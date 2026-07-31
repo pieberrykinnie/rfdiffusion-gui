@@ -1,0 +1,135 @@
+Bootstrap: docker
+From: rosettacommons/rfdiffusion
+
+# ---------------------------------------------------------------------------
+# rfdiffusion-gui runtime image (Phase 1)
+#
+# Base: rosettacommons/rfdiffusion -- CUDA 11.6.2 / cuDNN 8 / Ubuntu 20.04 /
+#       Python 3.9 / torch 1.12.1+cu116 / dgl 1.0.2+cu116 / e3nn 0.3.3 /
+#       hydra-core 1.3.2 / SE3Transformer. A proven, fully pinned solve of the
+#       hardest dependency problem in this project (R-1, R-2).
+#
+# WHY THE BASE IMAGE IS NOT ENOUGH
+#   The base installs the RosettaCommons RFdiffusion package, which does NOT
+#   support `inference.dump_pdb` / `inference.dump_pdb_path`. Those keys exist
+#   only in the sokrypton fork (config/inference/base.yaml lines 22-23) and are
+#   the entire mechanism behind per-step structure dumps -- so FR-16 (live step
+#   progress) and FR-17 (live 3D preview) depend on the fork specifically.
+#   We therefore clone the fork to /opt/RFdiffusion and put it on PYTHONPATH.
+#   No name collision: the base installs a package called `rfdiffusion`; the
+#   fork exposes top-level modules `inference`, `util`, `chemical`, ...
+#
+# GPU COVERAGE (verified against the live cluster, 2026-07-31)
+#   CUDA 11.6 covers sm_37..sm_86, so this image runs on:
+#     gpu, stamps-b, livi-b   (V100, sm_70)  -- 36 GPUs
+#     agpu, mcordgpu-b        (A30,  sm_80)  -- 12 GPUs
+#   It does NOT run on lgpu (L40s, sm_89) -- that needs the deferred Phase 2
+#   CUDA 12.x image.
+#
+# APPLICATION SOURCE IS NOT BAKED IN
+#   rfd-core and rfd-runner are bind-mounted at /opt/rfdgui (DD-2) so a Python
+#   change never requires rebuilding a multi-GB image.
+#
+# Build:  scripts/build-image.sh
+# Verify: scripts/verify-image.sh
+# ---------------------------------------------------------------------------
+
+%labels
+    Maintainer   rfdiffusion-gui
+    Phase        1
+    BaseImage    rosettacommons/rfdiffusion
+    CUDA         11.6.2
+    Python       3.9
+    Torch        1.12.1+cu116
+    RFdiffusion  sokrypton/RFdiffusion@597d37f2a686e23941440fddf6daa4cb778e7bc7
+    ColabDesign  sokrypton/ColabDesign@e31a56fe1d9b4de25c8697f3a28b75892941cc72
+    JaxLib       0.4.25+cuda11.cudnn86
+    GPUSupport   sm_70 (V100), sm_80 (A30) -- NOT sm_89 (L40s)
+
+%post
+    set -eux
+
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get -q update
+    apt-get install --no-install-recommends -y git wget ca-certificates unzip
+    rm -rf /var/lib/apt/lists/*
+    apt-get clean
+
+    # -----------------------------------------------------------------------
+    # sokrypton fork -- REQUIRED for inference.dump_pdb (FR-16, FR-17).
+    # Pinned to an explicit commit; the notebook left this floating (TD-19).
+    # -----------------------------------------------------------------------
+    RFD_SHA=597d37f2a686e23941440fddf6daa4cb778e7bc7
+    git clone https://github.com/sokrypton/RFdiffusion.git /opt/RFdiffusion
+    git -C /opt/RFdiffusion checkout "${RFD_SHA}"
+    git -C /opt/RFdiffusion rev-parse HEAD > /opt/RFdiffusion.sha
+
+    # Fail the BUILD, not a job three hours from now, if the fork ever loses
+    # the keys the live-progress feature depends on.
+    grep -q 'dump_pdb:'      /opt/RFdiffusion/config/inference/base.yaml
+    grep -q 'dump_pdb_path:' /opt/RFdiffusion/config/inference/base.yaml
+
+    # -----------------------------------------------------------------------
+    # JAX for ColabDesign (ProteinMPNN + AlphaFold).
+    #
+    # jaxlib 0.4.25+cuda11.cudnn86 is the NEWEST CUDA 11 build with cp39
+    # wheels (enumerated from jax_cuda_releases.html). It needs cuDNN >= 8.6,
+    # but the base image carries the cuDNN 8.4 era runtime -- so we install
+    # cuDNN as a pip package. That makes JAX independent of whatever cuDNN the
+    # base image happens to ship, removing the most likely failure cause up
+    # front rather than discovering it at runtime.
+    #
+    # If this still fails, the documented fallback ladder is:
+    #   1. jaxlib==0.4.7+cuda11.cudnn82  (matches base cuDNN; much older)
+    #   2. two images (Q3=B): colabdesign.sif on a CUDA 12 base
+    # See infrastructure-design.md section 3.
+    # -----------------------------------------------------------------------
+    pip install --no-cache-dir "nvidia-cudnn-cu11==8.6.0.163"
+
+    pip install --no-cache-dir \
+        "jax==0.4.25" \
+        "jaxlib==0.4.25+cuda11.cudnn86" \
+        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+    pip install --no-cache-dir "opt_einsum_fx"
+
+    CD_SHA=e31a56fe1d9b4de25c8697f3a28b75892941cc72
+    pip install --no-cache-dir --no-deps \
+        "git+https://github.com/sokrypton/ColabDesign.git@${CD_SHA}"
+    # ColabDesign's own runtime needs, installed explicitly so --no-deps above
+    # cannot silently pull a different jax and undo the pin.
+    pip install --no-cache-dir "py3Dmol" "joblib" "chex" "optax" "dm-haiku" "immutabledict"
+
+    echo "${CD_SHA}" > /opt/ColabDesign.sha
+
+    mkdir -p /opt/rfdgui /opt/weights /opt/outputs /scratch
+
+%environment
+    export DGLBACKEND=pytorch
+    export PYTHONNOUSERSITE=1
+
+    # cuDNN 8.6 supplied by pip must be found ahead of the base image's copy.
+    export LD_LIBRARY_PATH=/usr/local/lib/python3.9/dist-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH:-}
+
+    # Bind-mounted application source (DD-2) plus the sokrypton fork.
+    export PYTHONPATH=/opt/rfdgui/packages/rfd-core/src:/opt/rfdgui/packages/rfd-runner/src:/opt/RFdiffusion:${PYTHONPATH:-}
+
+    export RFD_FORK=/opt/RFdiffusion
+    export RFD_MODELS=/opt/weights/rfdiffusion
+    export RFD_AF_PARAMS=/opt/weights/alphafold
+    export ANANAS_BIN=/opt/weights/bin/ananas
+
+    # JAX must not preallocate the GPU -- torch runs in a sibling subprocess.
+    export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+%runscript
+    exec python3.9 -m rfd_runner "$@"
+
+%test
+    set -e
+    echo "== python"        && python3.9 -V
+    echo "== torch"         && python3.9 -c "import torch; print(torch.__version__)"
+    echo "== dgl / e3nn"    && python3.9 -c "import dgl, e3nn; print(dgl.__version__, e3nn.__version__)"
+    echo "== fork present"  && test -f /opt/RFdiffusion/run_inference.py
+    echo "== dump_pdb keys" && grep -c 'dump_pdb' /opt/RFdiffusion/config/inference/base.yaml
+    echo "== jax import"    && python3.9 -c "import jax; print(jax.__version__)"

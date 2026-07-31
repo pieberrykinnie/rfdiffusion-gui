@@ -1,0 +1,45 @@
+# Container images (multi-GB)
+*.sif
+*.simg
+containers/*.sif
+
+# Model weights (~8 GB, staged separately)
+weights/
+rfd-weights/
+
+# Run outputs
+runs/
+rfd-runs/
+outputs/
+
+# Local environment
+.env
+.venv/
+venv/
+
+# uv
+.uv/
+
+# Apptainer / Singularity cache
+.apptainer/
+.singularity/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Slurm artifacts left in the repo root
+slurm-*.out
+rfd-probe-*.sh
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/

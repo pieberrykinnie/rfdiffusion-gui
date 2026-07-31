@@ -118,15 +118,39 @@ for q in "quota -s" "lfs quota -h $HOME" "check-quota" "diskusage_report"; do
     printf '  %s:\n' "$q"; $q 2>&1 | head -12 | sed 's/^/    /'; break
   fi
 done
-AVAIL_KB=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $4}')
-if [ -n "${AVAIL_KB:-}" ]; then
-  AVAIL_GB=$((AVAIL_KB/1024/1024))
-  if [ "$AVAIL_GB" -ge 30 ]; then
-    pass "~${AVAIL_GB} GB available in \$HOME (need ~15-25 GB: weights + image + build cache)"
-  elif [ "$AVAIL_GB" -ge 15 ]; then
-    warn "~${AVAIL_GB} GB available -- tight. Consider --no-multimer, or RFD_OUTPUT_ROOT on /project"
+# NOTE: df shows the shared filesystem, which is NOT the binding limit -- the per-user
+# quota is. Parse the quota first and fall back to df only if quota is unavailable.
+HEADROOM_GB=""
+if command -v quota >/dev/null 2>&1; then
+  # quota output rows look like:  <filesystem>  <used>  <soft>  <hard>  ...
+  # with -s the sizes carry K/M/G/T suffixes; without it they are plain kilobytes.
+  HEADROOM_GB=$(quota -s 2>/dev/null | awk '
+    function gb(v,   n,s) {
+      n = v; s = v
+      gsub(/[^0-9.]/, "", n)
+      if (s ~ /K$/)      return n / 1048576
+      else if (s ~ /M$/) return n / 1024
+      else if (s ~ /G$/) return n
+      else if (s ~ /T$/) return n * 1024
+      else               return n / 1048576   # bare number = kilobytes
+    }
+    $2 ~ /^[0-9.]+[KMGT]?\*?$/ && $3 ~ /^[0-9.]+[KMGT]?$/ {
+      used = gb($2); soft = gb($3)
+      if (soft > 0) { printf "%d", soft - used; exit }
+    }')
+fi
+if [ -z "${HEADROOM_GB:-}" ]; then
+  AVAIL_KB=$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $4}')
+  [ -n "${AVAIL_KB:-}" ] && HEADROOM_GB=$((AVAIL_KB/1024/1024))
+  [ -n "${HEADROOM_GB:-}" ] && printf '  note     no quota command; using df (may overstate your real limit)\n'
+fi
+if [ -n "${HEADROOM_GB:-}" ]; then
+  if [ "$HEADROOM_GB" -ge 30 ] 2>/dev/null; then
+    pass "~${HEADROOM_GB} GB quota headroom (need ~15-25 GB: weights + image + build cache)"
+  elif [ "$HEADROOM_GB" -ge 15 ] 2>/dev/null; then
+    warn "~${HEADROOM_GB} GB quota headroom -- tight. Consider --no-multimer, or RFD_OUTPUT_ROOT on /project"
   else
-    fail "~${AVAIL_GB} GB available -- not enough; move weights/outputs to /project"
+    fail "~${HEADROOM_GB} GB quota headroom -- not enough; move weights/outputs to /project"
   fi
 fi
 if [ -d /project ]; then

@@ -3,6 +3,76 @@
 **Unit**: U1 Runtime and Container
 **Date**: 2026-07-31
 **Decisions**: Q1 = D · Q2 = A · Q3 = A · Q4 = A
+**Preflight**: verified on `yak` 2026-07-31 — 16 PASS, 0 WARN, 0 FAIL
+
+---
+
+## 0. Preflight Findings (verified on the real cluster)
+
+`scripts/preflight-grex.sh` was run on a Grex login node. All checks passed, and four results
+**change or strengthen this design**. Verified facts supersede the documentation-derived assumptions
+recorded earlier.
+
+### 0.1 ✅ Phase 1 is **not V100-only** — it covers 5 of 6 GPU partition families
+
+The real partition table includes **A30 partitions the documentation never mentioned**:
+
+| Partition | GPU | Compute cap. | GPUs | Walltime | CUDA 11.6? |
+|---|---|---|---|---|---|
+| `gpu` | V100 ×4 / 2 nodes | sm_70 | 8 | 7 d | ✅ |
+| `stamps` / `stamps-b` | V100 ×4 / 3 nodes | sm_70 | 12 | 21 d / 7 d | ✅ |
+| `livi` / `livi-b` | V100 ×16 / 1 node | sm_70 | 16 | 21 d / 7 d | ✅ |
+| `agpu` | **A30** ×2 / 2 nodes | **sm_80** | 4 | 7 d | ✅ |
+| `mcordgpu` / `mcordgpu-b` | **A30** ×4 / 2 nodes | **sm_80** | 8 | 21 d / 7 d | ✅ |
+| `lgpu` | L40s ×2 / 2 nodes | sm_89 | 4 | **3 d** | ❌ |
+
+**A30 is Ampere (sm_80), which CUDA 11.6 fully supports** — sm_80 arrived in CUDA 11.0.
+`torch 1.12.1+cu116` ships an arch list covering sm_37 … sm_86.
+
+So the Phase 1 image runs on **`gpu`, `stamps-b`, `livi-b`, `agpu`, and `mcordgpu-b`** —
+**36 V100s + 12 A30s**. Only `lgpu` (L40s, sm_89) is excluded.
+
+This substantially strengthens Q1 = D and **reduces the value of Phase 2** to "access L40s
+specifically", rather than "access most of the cluster's GPUs". `-b` partitions are preemptible and
+open to non-owners with a 1-hour minimum runtime guarantee, so a `def-` account reaches them.
+
+**Design change**: `RFD_DEFAULT_PARTITION` stays `gpu`, but the partition selector must offer the
+full CUDA-11.6-compatible set and **mark `lgpu` as incompatible with the Phase 1 image**. Recorded as
+a U3 requirement.
+
+### 0.2 ⚠️ `lgpu` walltime is **3 days**, not 7
+
+Contradicts the batch-jobs page, which lists 7 days for GPU partitions generally. Walltime validation
+must be **per-partition**, read from `sinfo`, not a single constant. Reinforces FR-6a.
+
+### 0.3 ⚠️ Login-node `python3` is **3.6.8**
+
+Far too old for FastAPI. **`uv` 0.12.0 is present**, so `rfd-web` must use a **uv-managed standalone
+Python**, never the system interpreter. Concretely: `requires-python = ">=3.11"` in `rfd-web`, and
+setup docs use `uv sync` / `uv run` (which download a suitable Python automatically) rather than
+`python3 -m venv`.
+
+This does **not** relax the Python 3.9 constraint on `rfd-core` — that comes from the *container*
+(§4), and both constraints hold simultaneously:
+
+| Package | Runs where | Python |
+|---|---|---|
+| `rfd-core` | container **and** login node | **3.9-compatible source** |
+| `rfd-runner` | container | 3.9 |
+| `rfd-web` | login node, uv-managed | ≥3.11 |
+
+### 0.4 ✅ Everything else confirmed
+
+- **Account**: `def-cardona` (single, so `--account` can default; no RAC ⇒ 400 CPU-cores/group cap
+  and preemptible partitions available)
+- **Container runtime**: `singularity-ce 4.4.1`, modules 4.2.2 / 4.3.6 / 4.4.1
+- **`--fakeroot`**: user namespaces enabled (`max_user_namespaces=1500`) — Q4 = A is viable
+- **Quota**: **100 GB soft / 105 GB hard**, 54 MB used. The ~15–25 GB baseline fits comfortably.
+  (Note: `df` reports 4.2 TB free on the shared filesystem — the **quota**, not `df`, is binding.)
+- **Egress**: `files.ipd.uw.edu`, `storage.googleapis.com`, `registry-1.docker.io`, `files.rcsb.org`,
+  `alphafold.ebi.ac.uk`, `pypi.org` all reachable from the login node — so
+  `singularity build` can pull `docker://rosettacommons/rfdiffusion` **directly on Grex**, and the
+  staging script can fetch weights without an intermediate hop.
 
 ---
 
@@ -273,7 +343,10 @@ whole approach, and both are cheap.
 
 ## 10. Phase 2 — CUDA 12.x (deferred, Q1 = D)
 
-**Trigger**: a real need for `lgpu` — designs exceeding 32 GB, or V100 queue contention.
+**Trigger (revised after preflight)**: a real need for **`lgpu` specifically** — designs exceeding
+32 GB of VRAM. Preflight showed the Phase 1 image already reaches 36 V100s and 12 A30s across five
+partition families, so "queue contention" is no longer a plausible trigger. Phase 2's value has
+narrowed to L40s access alone.
 
 **Approach**: a second definition from a `pytorch/pytorch:2.4.x-cuda12.4-cudnn9` base, replicating
 the same overlay. A single CUDA 12.4 torch wheel covers **sm_70 through sm_90**, so the Phase 2 image

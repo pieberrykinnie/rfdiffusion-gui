@@ -5,7 +5,16 @@
 - **Project Type**: Brownfield
 - **Start Date**: 2026-07-30T22:57:31Z
 - **Current Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: U1 Infrastructure Design (complete, awaiting user approval)
+- **Current Stage**: U1 Code Generation complete → next is U2a Core Domain
+
+## ⚠️ Constraints Carried Into U2a
+- **`rfd-core` MUST target Python 3.9** (container base image). No `StrEnum` → `class X(str, Enum)`;
+  no runtime PEP 604 unions → `Optional[...]` + `from __future__ import annotations`; no `match`.
+- **`rfd-web` uses a uv-managed Python ≥3.11** — the login node's system `python3` is **3.6.8**.
+- Partition selector must offer the CUDA-11.6-compatible set (`gpu`, `agpu`, `stamps-b`, `livi-b`,
+  `mcordgpu-b`) and mark **`lgpu` incompatible** with the Phase 1 image (U3).
+- Walltime limits are **per-partition** (`lgpu` = 3 d, others 7–21 d) — read from `sinfo`, never a
+  constant (U3, FR-6a).
 
 ## U1 Infrastructure Decisions (Q1=D, Q2=A, Q3=A, Q4=A)
 - **Phase 1**: one image `FROM rosettacommons/rfdiffusion` (CUDA 11.6 / torch 1.12.1+cu116 /
@@ -209,8 +218,12 @@ Workflow Planning and favours skipping optional stages.
   - Plan: unit-of-work-plan.md (all checkboxes [x])
 
 ### CONSTRUCTION PHASE (per-unit loop over U1, U2a, U2b, U3, U4)
-- [ ] U1 Runtime and Container: Infrastructure Design **EXECUTE** → Code Generation **EXECUTE**
+- [x] U1 Runtime and Container: Infrastructure Design **DONE** → Code Generation **DONE** 2026-07-31
       (Functional Design SKIP, NFR Requirements SKIP, NFR Design SKIP)
+      - Artifacts: `containers/rfdiffusion.def`, `scripts/{preflight-grex,build-image,stage-weights,verify-image}.sh`,
+        `env.example`, `docs/setup.md`, `reference/`, `.gitignore`
+      - **Preflight verified on `yak`**: 16 PASS / 0 WARN / 0 FAIL
+      - **Awaiting user execution on Grex**: build image → stage weights → verify on a GPU node
 - [ ] U2a Core Domain: Functional Design **EXECUTE** → Code Generation **EXECUTE**
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
 - [ ] U2b Runner: Functional Design **EXECUTE** → Code Generation **EXECUTE**
