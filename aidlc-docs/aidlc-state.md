@@ -4,8 +4,36 @@
 - **Project Name**: rfdiffusion-gui
 - **Project Type**: Brownfield
 - **Start Date**: 2026-07-30T22:57:31Z
-- **Current Phase**: INCEPTION
-- **Current Stage**: Units Generation (complete, awaiting user approval)
+- **Current Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
+- **Current Stage**: U1 Infrastructure Design (complete, awaiting user approval)
+
+## U1 Infrastructure Decisions (Q1=D, Q2=A, Q3=A, Q4=A)
+- **Phase 1**: one image `FROM rosettacommons/rfdiffusion` (CUDA 11.6 / torch 1.12.1+cu116 /
+  dgl 1.0.2+cu116 / e3nn 0.3.3 / Python 3.9), targeting **`gpu` (V100) only**, with the
+  **sokrypton fork** cloned in for `dump_pdb` and ColabDesign/JAX overlaid. Built on Grex `--fakeroot`.
+- **Phase 2 deferred**: CUDA 12.x variant for `lgpu`. `RFD_IMAGE` is configurable, so swapping is a
+  config change, not a code change.
+- ⚠️ **RISK + PRE-PLANNED FALLBACK**: ColabDesign may need newer JAX than CUDA 11.6 allows (JAX cuda11
+  wheels are off-PyPI, on the `jax-releases` index, and old). If verification step 6 fails, fall back
+  to **two images** — torch and JAX run as sequential subprocesses, so differing CUDA versions in
+  separate containers is not a conflict. No re-decision needed.
+- ⚠️ **HARD CONSTRAINT ON U2a**: base image is **Python 3.9**, so **`rfd-core` must target 3.9** —
+  no `StrEnum` (use `class X(str, Enum)`), no runtime PEP 604 unions (use `Optional[...]` plus
+  `from __future__ import annotations`), no `match`. `rfd-web` is unconstrained.
+- **e3nn 0.3.3, not 0.5.5** — the notebook used 0.5.5 only because Colab's newer torch required it;
+  on torch 1.12 the inherited pin is the correct one.
+
+## U1 Research Findings (2026-07-31)
+1. **Official `rosettacommons/rfdiffusion` container exists but is unusable as-is.**
+   `inference.dump_pdb` / `dump_pdb_path` exist **only in the sokrypton fork** — they are the entire
+   mechanism behind FR-16 and FR-17. The official image cannot provide live progress.
+   Its *pinned dependency set* is still valuable as a base.
+2. **Two viable stacks, far apart**: official = CUDA 11.6 / torch 1.12.1+cu116 / dgl 1.0.2+cu116 /
+   e3nn 0.3.3, **fully pinned and proven**; notebook = CUDA 12.4 / torch 2.4 / e3nn 0.5.5,
+   **almost entirely unpinned**.
+3. ⚠️ **The proven stack cannot run on `lgpu`.** `gpu` = V100 (sm_70), `lgpu` = L40s (**sm_89**).
+   CUDA 11.6 predates Ada Lovelace (sm_89 needs ≥11.8), so torch 1.12.1+cu116 is **V100-only**.
+   Supporting `lgpu` means resolving the CUDA 12.x stack ourselves — R-1/R-2 in full.
 
 ## Units (5, amended from 4 by Units Generation Q1=A)
 | Unit | Package / dir | Depends on | Testable without cluster |
