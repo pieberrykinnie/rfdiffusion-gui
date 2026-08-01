@@ -37,7 +37,13 @@ module load singularity 2>/dev/null || module load apptainer 2>/dev/null || true
 ENGINE=$(command -v singularity || command -v apptainer)
 [ -n "$ENGINE" ] || { printf 'ERROR: no singularity/apptainer on PATH\n' >&2; exit 1; }
 
-RUN="$ENGINE exec --nv --bind ${RFD_WEIGHTS}:/opt/weights ${RFD_IMAGE}"
+SCRATCH="${TMPDIR:-/tmp}/rfd-verify-$$"
+mkdir -p "$SCRATCH"
+trap 'rm -rf "$SCRATCH"' EXIT
+RUN="$ENGINE exec --nv --bind ${RFD_WEIGHTS}:/opt/weights --bind ${SCRATCH}:/scratch ${RFD_IMAGE}"
+
+# The image's python is the base image's uv venv, not a system interpreter.
+VPY=/app/RFdiffusion/.venv/bin/python
 
 printf 'Verifying %s\n' "$RFD_IMAGE"
 printf 'Engine:   %s\n' "$($ENGINE --version)"
@@ -55,7 +61,7 @@ fi
 
 # ------------------------------------------------------------- 2. torch/CUDA
 sect "2. torch sees CUDA and the device is supported"
-OUT=$($RUN python3.9 -c "
+OUT=$($RUN $VPY -c "
 import torch
 print('torch', torch.__version__)
 print('cuda_available', torch.cuda.is_available())
@@ -90,7 +96,7 @@ fi
 
 # ------------------------------------------------------------ 4. THE JAX RISK
 sect "4. JAX imports and sees the GPU (known CUDA-11 risk)"
-OUT=$($RUN python3.9 -c "
+OUT=$($RUN $VPY -c "
 import jax
 print('jax', jax.__version__)
 print('devices', jax.devices())
@@ -112,17 +118,17 @@ fi
 
 # ----------------------------------------------------------- 5. dgl and e3nn
 sect "5. dgl / e3nn import"
-OUT=$($RUN python3.9 -c "import dgl, e3nn; print('dgl', dgl.__version__, 'e3nn', e3nn.__version__)" 2>&1)
+OUT=$($RUN $VPY -c "import dgl, e3nn; print('dgl', dgl.__version__, 'e3nn', e3nn.__version__)" 2>&1)
 printf '%s\n' "$OUT" | sed 's/^/    /'
 printf '%s' "$OUT" | grep -q '^dgl ' && ok "dgl and e3nn import" || bad "dgl/e3nn import failed"
 
 # ---------------------------------------------------- 6. run_inference --help
 sect "6. RFdiffusion entry point runs"
-if $RUN python3.9 /opt/RFdiffusion/run_inference.py --help >/dev/null 2>&1; then
+if $RUN $VPY /opt/RFdiffusion/run_inference.py --help >/dev/null 2>&1; then
   ok "run_inference.py --help succeeded"
 else
   # Hydra returns non-zero for --help in some versions; fall back to an import.
-  if $RUN python3.9 -c "import sys; sys.path.insert(0,'/opt/RFdiffusion'); import inference.utils" 2>/dev/null; then
+  if $RUN $VPY -c "import sys; sys.path.insert(0,'/opt/RFdiffusion'); import inference.utils" 2>/dev/null; then
     ok "inference.utils imports (Hydra --help exit code is not meaningful here)"
   else
     bad "cannot run or import RFdiffusion from the fork"
@@ -130,11 +136,12 @@ else
 fi
 
 # --------------------------------------------------------------- 7. weights
-sect "7. Model weights staged and visible"
-for f in rfdiffusion/Base_ckpt.pt rfdiffusion/Complex_base_ckpt.pt rfdiffusion/Complex_beta_ckpt.pt; do
-  if $RUN test -s "/opt/weights/$f"; then ok "present: $f"; else bad "missing: $f -- run scripts/stage-weights.sh"; fi
+sect "7. Model assets visible"
+# Checkpoints ship inside the image (symlinked into the fork), not staged.
+for f in Base_ckpt.pt Complex_base_ckpt.pt Complex_beta_ckpt.pt; do
+  if $RUN test -s "/opt/RFdiffusion/models/$f"; then ok "in image: $f"; else bad "missing from image: $f -- rebuild"; fi
 done
-if $RUN test -d /opt/weights/rfdiffusion/schedules; then ok "present: schedules/"; else bad "missing: schedules/"; fi
+if $RUN test -d /opt/schedules-seed; then ok "in image: schedules seed"; else bad "missing from image: /opt/schedules-seed -- rebuild"; fi
 if $RUN test -x /opt/weights/bin/ananas; then ok "present: ananas (symmetry=auto available)"; else printf '  [ WARN ] ananas missing -- symmetry="auto" will be unavailable\n'; fi
 if $RUN test -d /opt/weights/alphafold; then ok "present: alphafold params"; else bad "missing: alphafold params"; fi
 

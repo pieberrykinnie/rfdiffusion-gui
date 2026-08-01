@@ -58,20 +58,38 @@ From: rosettacommons/rfdiffusion
     # unmapped on the host, so it cannot write there and the build dies with:
     #   Couldn't create temporary file /tmp/apt.conf.XXXXXX ... for apt-key
     #
-    # We do not need apt anyway. The base image already installs git (see the
-    # RosettaCommons Dockerfile), and everything below uses only git, pip,
-    # grep and mkdir. wget/unzip were never used inside this container --
-    # stage-weights.sh runs those on the HOST.
+    # We do not need apt anyway. The base image already ships git, curl, wget,
+    # ca-certificates, build-essential and uv (confirmed from the registry
+    # image config), and everything below uses only those.
     # -----------------------------------------------------------------------
 
     # Keep temp files inside the image rather than on a bind-mounted host
-    # directory, so nothing here depends on host /tmp permissions. pip in
-    # particular unpacks wheels via TMPDIR.
+    # directory, so nothing here depends on host /tmp permissions -- uv
+    # unpacks wheels via TMPDIR.
     mkdir -p /opt/buildtmp
     export TMPDIR=/opt/buildtmp
 
-    # Fail early and clearly if the base image ever stops shipping git.
+    # -----------------------------------------------------------------------
+    # THE BASE IMAGE IS uv-BASED, NOT pip-BASED.
+    #
+    # The published rosettacommons/rfdiffusion image is NOT built from the
+    # pip-based Dockerfile in that repo. Its actual build (read from the
+    # registry image config) is:
+    #     COPY /uv /uvx /bin/
+    #     uv venv --python 3.9 && uv pip install dgl==1.0.2+cu116 torch==1.12.1+cu116 ...
+    #     ENV PATH=/app/RFdiffusion/.venv/bin:...
+    #
+    # So `python3.9` resolves to /app/RFdiffusion/.venv/bin/python3.9, and that
+    # venv has NO pip module -- uv does not install one by default. Every
+    # install below must therefore go through uv, targeting that venv
+    # explicitly.
+    # -----------------------------------------------------------------------
+    VENV=/app/RFdiffusion/.venv
+    VPY="${VENV}/bin/python"
+
     command -v git >/dev/null || { echo "FATAL: git missing from base image"; exit 1; }
+    command -v uv  >/dev/null || { echo "FATAL: uv missing from base image"; exit 1; }
+    test -x "$VPY" || { echo "FATAL: expected venv interpreter at $VPY"; exit 1; }
 
     # -----------------------------------------------------------------------
     # sokrypton fork -- REQUIRED for inference.dump_pdb (FR-16, FR-17).
@@ -102,41 +120,81 @@ From: rosettacommons/rfdiffusion
     #   2. two images (Q3=B): colabdesign.sif on a CUDA 12 base
     # See infrastructure-design.md section 3.
     # -----------------------------------------------------------------------
-    python3.9 -m pip install --no-cache-dir "nvidia-cudnn-cu11==8.6.0.163"
+    uv pip install --python "$VPY" --no-cache "nvidia-cudnn-cu11==8.6.0.163"
 
-    python3.9 -m pip install --no-cache-dir \
+    uv pip install --python "$VPY" --no-cache \
         "jax==0.4.25" \
         "jaxlib==0.4.25+cuda11.cudnn86" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
-    python3.9 -m pip install --no-cache-dir "opt_einsum_fx"
+    uv pip install --python "$VPY" --no-cache "opt_einsum_fx"
 
     CD_SHA=e31a56fe1d9b4de25c8697f3a28b75892941cc72
-    python3.9 -m pip install --no-cache-dir --no-deps \
+    uv pip install --python "$VPY" --no-cache --no-deps \
         "git+https://github.com/sokrypton/ColabDesign.git@${CD_SHA}"
     # ColabDesign's own runtime needs, installed explicitly so --no-deps above
     # cannot silently pull a different jax and undo the pin.
-    python3.9 -m pip install --no-cache-dir "py3Dmol" "joblib" "chex" "optax" "dm-haiku" "immutabledict"
+    uv pip install --python "$VPY" --no-cache \
+        "py3Dmol" "joblib" "chex" "optax" "dm-haiku" "immutabledict"
 
     echo "${CD_SHA}" > /opt/ColabDesign.sha
 
+    # -----------------------------------------------------------------------
+    # MODEL CHECKPOINTS ARE ALREADY IN THE BASE IMAGE.
+    #
+    # The published image bakes in all nine RFdiffusion checkpoints under
+    # /app/RFdiffusion/models -- including the three this project uses
+    # (Base_ckpt.pt, Complex_base_ckpt.pt, Complex_beta_ckpt.pt). That is what
+    # the 5.6 GiB layer is.
+    #
+    # The fork resolves checkpoints as {SCRIPT_DIR}/../models/*.pt, i.e.
+    # /opt/RFdiffusion/models -- so a symlink is all that is needed, and
+    # stage-weights.sh no longer downloads them at all (~4 GB saved).
+    # -----------------------------------------------------------------------
+    test -f /app/RFdiffusion/models/Base_ckpt.pt || \
+        { echo "FATAL: base image no longer ships model checkpoints"; exit 1; }
+    ln -s /app/RFdiffusion/models /opt/RFdiffusion/models
+
+    # -----------------------------------------------------------------------
+    # DIFFUSION SCHEDULES.
+    #
+    # The fork caches schedules in {SCRIPT_DIR}/../schedules and WRITES there
+    # when a requested T is not cached. A SIF is read-only at run time, so that
+    # directory must live on writable scratch. We ship a pre-computed seed and
+    # symlink the location the fork expects onto /scratch (bound from $TMPDIR).
+    #
+    # The runner (U2b) is responsible for creating /scratch/schedules and
+    # copying the seed into it before invoking run_inference.py -- the fork
+    # does os.mkdir() on this path at import time, which would fail on a
+    # dangling symlink.
+    # -----------------------------------------------------------------------
+    mkdir -p /opt/schedules-seed
+    wget -q -O /opt/schedules.zip https://files.ipd.uw.edu/krypton/schedules.zip
+    ( cd /opt/schedules-seed && python3 -c "import zipfile,sys; zipfile.ZipFile('/opt/schedules.zip').extractall('.')" )
+    rm -f /opt/schedules.zip
+    ln -s /scratch/schedules /opt/RFdiffusion/schedules
+
     mkdir -p /opt/rfdgui /opt/weights /opt/outputs /scratch
 
-    # Bind-mount points and build scratch cleanup.
+    # Build scratch cleanup.
     rm -rf /opt/buildtmp
 
 %environment
     export DGLBACKEND=pytorch
     export PYTHONNOUSERSITE=1
 
-    # cuDNN 8.6 supplied by pip must be found ahead of the base image's copy.
-    export LD_LIBRARY_PATH=/usr/local/lib/python3.9/dist-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH:-}
+    # cuDNN 8.6 supplied by pip must be found ahead of the base image's 8.4.0.27.
+    # NOTE the path: packages live in the image's uv venv, NOT in dist-packages.
+    export LD_LIBRARY_PATH=/app/RFdiffusion/.venv/lib/python3.9/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH:-}
 
     # Bind-mounted application source (DD-2) plus the sokrypton fork.
     export PYTHONPATH=/opt/rfdgui/packages/rfd-core/src:/opt/rfdgui/packages/rfd-runner/src:/opt/RFdiffusion:${PYTHONPATH:-}
 
     export RFD_FORK=/opt/RFdiffusion
-    export RFD_MODELS=/opt/weights/rfdiffusion
+    # Checkpoints come from the base image (symlinked into the fork), not from
+    # the staged weights directory.
+    export RFD_MODELS=/opt/RFdiffusion/models
+    export RFD_SCHEDULES_SEED=/opt/schedules-seed
     export RFD_AF_PARAMS=/opt/weights/alphafold
     export ANANAS_BIN=/opt/weights/bin/ananas
 
@@ -144,13 +202,18 @@ From: rosettacommons/rfdiffusion
     export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
 %runscript
-    exec python3.9 -m rfd_runner "$@"
+    exec /app/RFdiffusion/.venv/bin/python -m rfd_runner "$@"
 
 %test
     set -e
-    echo "== python"        && python3.9 -V
-    echo "== torch"         && python3.9 -c "import torch; print(torch.__version__)"
-    echo "== dgl / e3nn"    && python3.9 -c "import dgl, e3nn; print(dgl.__version__, e3nn.__version__)"
-    echo "== fork present"  && test -f /opt/RFdiffusion/run_inference.py
-    echo "== dump_pdb keys" && grep -c 'dump_pdb' /opt/RFdiffusion/config/inference/base.yaml
-    echo "== jax import"    && python3.9 -c "import jax; print(jax.__version__)"
+    PY=/app/RFdiffusion/.venv/bin/python
+    echo "== python"         && $PY -V
+    echo "== torch"          && $PY -c "import torch; print(torch.__version__)"
+    echo "== dgl / e3nn"     && $PY -c "import dgl, e3nn; print(dgl.__version__, e3nn.__version__)"
+    echo "== fork present"   && test -f /opt/RFdiffusion/run_inference.py
+    echo "== dump_pdb keys"  && grep -c 'dump_pdb' /opt/RFdiffusion/config/inference/base.yaml
+    echo "== checkpoints"    && ls /opt/RFdiffusion/models/Base_ckpt.pt \
+                                   /opt/RFdiffusion/models/Complex_base_ckpt.pt \
+                                   /opt/RFdiffusion/models/Complex_beta_ckpt.pt
+    echo "== schedules seed" && ls /opt/schedules-seed | head -3
+    echo "== jax import"     && $PY -c "import jax; print(jax.__version__)"

@@ -1,11 +1,17 @@
 #!/bin/bash
-# Stage RFdiffusion + AlphaFold model weights and the AnAnaS binary.
+# Stage AlphaFold parameters and the AnAnaS binary.
 #
 #   bash scripts/stage-weights.sh [--no-multimer] [--force]
 #
-# Run ONCE on a login node before the first job. Roughly 8 GB (about 4 GB with
+# Run ONCE on a login node before the first job. Roughly 4 GB (a few MB with
 # --no-multimer). Safe to interrupt and rerun -- downloads resume and completed
 # assets are skipped.
+#
+# NOT staged here, because the container image already contains them:
+#   * RFdiffusion checkpoints -- the published rosettacommons/rfdiffusion image
+#     bakes in all nine, including the three this project uses. The image
+#     symlinks them to /opt/RFdiffusion/models. (~4 GB saved.)
+#   * Diffusion schedules -- shipped in the image at /opt/schedules-seed.
 #
 # Uses curl, never aria2c: aria2 needs apt-get and there is no root on Grex.
 
@@ -26,12 +32,11 @@ for a in "$@"; do
   esac
 done
 
-MODELS="${RFD_WEIGHTS}/rfdiffusion"
 AFDIR="${RFD_WEIGHTS}/alphafold"
 BINDIR="${RFD_WEIGHTS}/bin"
 MANIFEST="${RFD_WEIGHTS}/manifest.txt"
 
-mkdir -p "$MODELS" "$AFDIR" "$BINDIR"
+mkdir -p "$AFDIR" "$BINDIR"
 
 say()  { printf '\n>>> %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
@@ -56,40 +61,11 @@ fetch() {
 # that actually happens here: a truncated download.
 record() { basename "$1" >> "$MANIFEST"; sort -u -o "$MANIFEST" "$MANIFEST"; }
 
-check_torch_ckpt() {
-  f=$1
-  [ -s "$f" ] || die "empty: $f"
-  # torch checkpoints are ZIP archives (PK magic) in modern formats.
-  head -c 2 "$f" | grep -q 'PK' || die "not a valid torch checkpoint (truncated?): $f"
-  sz=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f")
-  [ "$sz" -gt 100000000 ] || die "suspiciously small ($sz bytes), likely truncated: $f"
-  info "ok: $(basename "$f") ($((sz/1024/1024)) MB)"
-  record "$f"
-}
-
-# ---------------------------------------------------------------- RFdiffusion
-say "RFdiffusion checkpoints -> $MODELS"
-IPD=http://files.ipd.uw.edu/pub/RFdiffusion
-fetch "$IPD/6f5902ac237024bdd0c176cb93063dc4/Base_ckpt.pt"         "$MODELS/Base_ckpt.pt"
-check_torch_ckpt "$MODELS/Base_ckpt.pt"
-fetch "$IPD/e29311f6f1bf1af907f9ef9f44b8328b/Complex_base_ckpt.pt" "$MODELS/Complex_base_ckpt.pt"
-check_torch_ckpt "$MODELS/Complex_base_ckpt.pt"
-fetch "$IPD/f572d396fae9206628714fb2ce00f72e/Complex_beta_ckpt.pt" "$MODELS/Complex_beta_ckpt.pt"
-check_torch_ckpt "$MODELS/Complex_beta_ckpt.pt"
-
-# ------------------------------------------------------------------ schedules
-say "Diffusion schedules"
-if [ ! -d "$MODELS/schedules" ] || [ "$FORCE" -eq 1 ]; then
-  fetch "https://files.ipd.uw.edu/krypton/schedules.zip" "$MODELS/schedules.zip"
-  unzip -tq "$MODELS/schedules.zip" || die "schedules.zip is corrupt (truncated?)"
-  rm -rf "$MODELS/schedules"
-  mkdir -p "$MODELS/schedules"
-  unzip -oq "$MODELS/schedules.zip" -d "$MODELS/schedules"
-  rm -f "$MODELS/schedules.zip"
-  info "ok: schedules extracted"
-else
-  info "skip (already staged): schedules"
-fi
+# ----------------------------------------------------- checkpoints / schedules
+say "RFdiffusion checkpoints and schedules"
+info "skipped -- both are baked into the container image"
+info "  checkpoints: /opt/RFdiffusion/models (symlink to /app/RFdiffusion/models)"
+info "  schedules:   /opt/schedules-seed"
 
 # --------------------------------------------------------------------- ananas
 say "AnAnaS symmetry detector"
@@ -147,10 +123,12 @@ fi
 
 cat <<EOF
 
-Weights staged at: $RFD_WEIGHTS
-  rfdiffusion/   3 checkpoints + schedules/
+Staged at: $RFD_WEIGHTS
   alphafold/     parameters$([ "$MULTIMER" -eq 0 ] && echo ' (monomer only)')
   bin/ananas     symmetry detector
+
+RFdiffusion checkpoints and diffusion schedules are in the container image;
+nothing to stage for those.
 
 Set RFD_WEIGHTS=$RFD_WEIGHTS in your .env if you used a non-default location.
 Next: verify on a GPU node with scripts/verify-image.sh

@@ -7,6 +7,15 @@
 - **Current Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
 - **Current Stage**: U1 Code Generation complete → next is U2a Core Domain
 
+## ⚠️ Constraint Carried Into U2b (from U1 build findings)
+- **Runner must seed diffusion schedules before invoking `run_inference.py`.** The image ships a seed
+  at `/opt/schedules-seed`; `/opt/RFdiffusion/schedules` is a symlink to `/scratch/schedules`
+  (bound from `$TMPDIR`). The runner must `mkdir -p /scratch/schedules` and copy the seed in — the
+  fork does `os.mkdir()` on that path at import, which raises `FileExistsError` on a dangling symlink,
+  and it *writes* there for uncached `T` values, which a read-only SIF cannot satisfy.
+- **The container's Python is `/app/RFdiffusion/.venv/bin/python`** (a uv venv), not `python3.9` on
+  PATH in the usual sense. Anything invoking the interpreter explicitly must use that path.
+
 ## ⚠️ Constraints Carried Into U2a
 - **`rfd-core` MUST target Python 3.9** (container base image). No `StrEnum` → `class X(str, Enum)`;
   no runtime PEP 604 unions → `Optional[...]` + `from __future__ import annotations`; no `match`.

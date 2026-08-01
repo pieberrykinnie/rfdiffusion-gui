@@ -395,6 +395,72 @@ rather than working around it, and makes the build faster and more deterministic
 service account. `apt` is the common one; `gpg` agents and some package managers behave similarly.
 Prefer tools that run as the (fake) root user throughout.
 
+### 8.1c ⚠️ The published base image is **uv-based**, not built from its own repo Dockerfile
+
+**Symptom**: third build. Every earlier step succeeded — layers pulled, fork cloned at the pinned SHA,
+`dump_pdb` assertions passed — then:
+
+```
++ python3.9 -m pip install --no-cache-dir nvidia-cudnn-cu11==8.6.0.163
+/app/RFdiffusion/.venv/bin/python3.9: No module named pip
+```
+
+**Root cause**: **`rosettacommons/rfdiffusion` on Docker Hub is not built from the pip-based
+Dockerfile in that repository.** Reading the actual image config from the registry shows a completely
+different build:
+
+```
+COPY /uv /uvx /bin/
+RUN ... uv venv --python 3.9 && uv pip install dgl==1.0.2+cu116 torch==1.12.1+cu116 \
+        e3nn==0.3.3 ... && uv pip install /app/RFdiffusion/env/SE3Transformer \
+        && uv pip install -e /app/RFdiffusion --no-deps
+ENV PATH=/app/RFdiffusion/.venv/bin:/usr/local/nvidia/bin:...
+ENTRYPOINT ["/app/RFdiffusion/.venv/bin/python", "/app/RFdiffusion/scripts/run_inference.py"]
+```
+
+So `python3.9` resolves to the **uv venv** at `/app/RFdiffusion/.venv`, and that venv has **no `pip`
+module** — uv does not install one by default. This was a **documentation-vs-reality gap**: reading
+the repo's Dockerfile was reasonable, but only the registry image config is authoritative about what
+was actually published.
+
+**Fixes applied**:
+- All installs go through `uv pip install --python /app/RFdiffusion/.venv/bin/python --no-cache …`,
+  targeting the venv explicitly. Guards assert `uv` and the venv interpreter exist.
+- `%runscript` and `%test` use `/app/RFdiffusion/.venv/bin/python`, not `python3.9`.
+- **`LD_LIBRARY_PATH` corrected.** It pointed at `/usr/local/lib/python3.9/dist-packages/nvidia/cudnn/lib`,
+  which does not exist here. The real path is
+  `/app/RFdiffusion/.venv/lib/python3.9/site-packages/nvidia/cudnn/lib`. Left uncorrected, the
+  pip-supplied cuDNN 8.6 would have been invisible and JAX would have silently fallen back to the
+  base image's 8.4 — producing exactly the failure the cuDNN pin was meant to prevent.
+
+### 8.1d ✅ Good news: model checkpoints and the CUDA/cuDNN versions are confirmed in-image
+
+The same registry inspection produced two findings that **simplify** the design.
+
+**1. All nine RFdiffusion checkpoints are baked into the image**, downloaded at build time into
+`/app/RFdiffusion/models/` — including all three this project uses (`Base_ckpt.pt`,
+`Complex_base_ckpt.pt`, `Complex_beta_ckpt.pt`). That is what the 5.6 GiB layer contains.
+
+The fork resolves checkpoints as `{SCRIPT_DIR}/../models/*.pt` (confirmed in `inference/model_runners.py`
+lines 80–91), i.e. `/opt/RFdiffusion/models`. A **symlink** to `/app/RFdiffusion/models` is therefore
+sufficient.
+
+**Consequence**: `stage-weights.sh` **no longer downloads RFdiffusion checkpoints at all — roughly
+4 GB less to stage**, and one less thing that can be truncated. Staging is now AlphaFold parameters
+plus the `ananas` binary.
+
+**2. `NV_CUDNN_VERSION=8.4.0.27` confirmed** — the assumption behind pinning `nvidia-cudnn-cu11==8.6.0.163`
+was correct. jaxlib `cuda11.cudnn86` needs ≥ 8.6, and the base genuinely ships 8.4.
+
+**3. Diffusion schedules need writable storage.** `model_runners.py` line 31 does
+`os.mkdir(f'{SCRIPT_DIR}/../schedules')` at import when absent, and `Diffuser(cache_dir=…)` **writes**
+there for uncached `T` values. A SIF is read-only at run time, so:
+- the image ships a pre-computed seed at `/opt/schedules-seed`
+- `/opt/RFdiffusion/schedules` is a **symlink to `/scratch/schedules`** (bound from `$TMPDIR`)
+- **U2b requirement**: the runner must create `/scratch/schedules` and copy the seed into it before
+  invoking `run_inference.py`. `os.mkdir` on a dangling symlink raises `FileExistsError`, so this
+  cannot be left to the fork.
+
 ### 8.2 Remaining fallbacks
 
 If a staged `--fakeroot` build still fails: (1) Sylabs remote build `--remote`; (2) local
