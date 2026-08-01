@@ -121,6 +121,36 @@ that changed the design:
 
 ---
 
+## Build Failures Encountered and Fixed
+
+Two failures on the real cluster, both diagnosed to root cause and fixed in the artifacts rather
+than worked around.
+
+### 1. `--fakeroot` cannot read inputs on root_squashed network storage
+
+`permission denied` opening the definition file, before any build step. `--fakeroot` remaps the
+invoking UID to root inside a user namespace; `root_squash` on `/project` (Lustre) and `/home` (NFS)
+maps that back to `nobody`, which cannot traverse a `0700` home directory.
+
+**Fixed** by staging the build onto node-local `$TMPDIR` in `build-image.sh` — which is the correct
+approach anyway, since a container build is a many-small-files workload that Grex's docs say to keep
+off the shared filesystem. Also keeps the transient build cache off the 100 GB quota.
+
+### 2. `apt-get` cannot run inside a `--fakeroot` `%post`
+
+`Couldn't create temporary file /tmp/apt.conf.XXXXXX for passing config to apt-key`, so every
+repository was rejected as unsigned. `apt` drops privileges to its sandbox user `_apt` (uid 100),
+which is unmapped on the host under fakeroot and therefore cannot write to the bind-mounted `/tmp`.
+
+**Fixed** by removing `apt-get` from `%post` entirely — it was speculative. `git` ships in the base
+image, `ca-certificates` is already present, and `wget`/`unzip` are only ever used on the host by
+`stage-weights.sh`. `%post` now uses only `git`, `pip`, `grep`, `mkdir`.
+
+**Both fixes made the design better, not just unblocked.** The first moved build I/O to where it
+belonged; the second removed an unnecessary dependency and a whole class of privilege-drop failures.
+
+---
+
 ## Verification Status
 
 All shell scripts pass `bash -n`. The quota parser was unit-tested against both real Grex `quota -s`

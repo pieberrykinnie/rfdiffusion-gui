@@ -352,6 +352,49 @@ no longer counts against the 100 GB `/home` quota.
 **Preflight now detects the precondition**: `preflight-grex.sh` reports the repo's filesystem type
 and `$HOME`'s mode, and warns when a hand-run `--fakeroot` build from that path would fail.
 
+### 8.1b ⚠️ `apt-get` cannot run inside a `--fakeroot` `%post` (observed 2026-07-31)
+
+**Symptom**: after the staging fix, the build pulled all base layers successfully and entered
+`%post`, then failed on the very first command:
+
+```
+Err:1 http://archive.ubuntu.com/ubuntu focal InRelease
+  Couldn't create temporary file /tmp/apt.conf.E9vUL4 for passing config to apt-key
+E: The repository '...' is not signed.
+FATAL: While performing build: while running engine: exit status 100
+```
+
+**Root cause**: Singularity bind-mounts the host's `/tmp` (and `/var/tmp`) into the build container.
+`apt` **drops privileges to its sandbox user `_apt` (uid 100)** before fetching, as a security
+measure. Under the `--fakeroot` UID mapping that identity is unmapped on the host, so `_apt` cannot
+create files in the bind-mounted `/tmp`. `apt-key` then cannot pass its config, GPG verification
+fails, and every repository is rejected as unsigned.
+
+This is a general property of `apt` + `--fakeroot` + bind-mounted `/tmp` — not specific to this image.
+
+**Fix**: **remove `apt-get` from `%post` entirely.** It was never needed:
+
+| Package we were installing | Actually required? |
+|---|---|
+| `git` | **already in the base image** (RosettaCommons Dockerfile installs it) |
+| `ca-certificates` | already present — the base image pip-installs from `git+https://` |
+| `wget`, `unzip` | **never used inside the container** — `stage-weights.sh` runs those on the host |
+
+`%post` now uses only `git`, `pip`, `grep` and `mkdir`. Removing apt eliminates the failure mode
+rather than working around it, and makes the build faster and more deterministic.
+
+**Hardening applied alongside**:
+- `%post` sets `TMPDIR=/opt/buildtmp`, a directory **inside the image**, so no build step depends on
+  host `/tmp` permissions (pip in particular unpacks wheels via `TMPDIR`). Removed at the end of
+  `%post` so it does not bloat the image.
+- `pip` is invoked as `python3.9 -m pip` so the interpreter is unambiguous.
+- A `command -v git` guard fails the build with a clear message if the base image ever stops
+  shipping git.
+
+**General lesson recorded**: inside a `--fakeroot` `%post`, avoid any tool that drops privileges to a
+service account. `apt` is the common one; `gpg` agents and some package managers behave similarly.
+Prefer tools that run as the (fake) root user throughout.
+
 ### 8.2 Remaining fallbacks
 
 If a staged `--fakeroot` build still fails: (1) Sylabs remote build `--remote`; (2) local

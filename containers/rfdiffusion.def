@@ -49,11 +49,29 @@ From: rosettacommons/rfdiffusion
 %post
     set -eux
 
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get -q update
-    apt-get install --no-install-recommends -y git wget ca-certificates unzip
-    rm -rf /var/lib/apt/lists/*
-    apt-get clean
+    # -----------------------------------------------------------------------
+    # NO apt-get HERE, DELIBERATELY.
+    #
+    # Singularity bind-mounts the host's /tmp (and /var/tmp) into the build
+    # container. apt drops privileges to its sandbox user `_apt` (uid 100)
+    # before fetching; under the --fakeroot UID mapping that identity is
+    # unmapped on the host, so it cannot write there and the build dies with:
+    #   Couldn't create temporary file /tmp/apt.conf.XXXXXX ... for apt-key
+    #
+    # We do not need apt anyway. The base image already installs git (see the
+    # RosettaCommons Dockerfile), and everything below uses only git, pip,
+    # grep and mkdir. wget/unzip were never used inside this container --
+    # stage-weights.sh runs those on the HOST.
+    # -----------------------------------------------------------------------
+
+    # Keep temp files inside the image rather than on a bind-mounted host
+    # directory, so nothing here depends on host /tmp permissions. pip in
+    # particular unpacks wheels via TMPDIR.
+    mkdir -p /opt/buildtmp
+    export TMPDIR=/opt/buildtmp
+
+    # Fail early and clearly if the base image ever stops shipping git.
+    command -v git >/dev/null || { echo "FATAL: git missing from base image"; exit 1; }
 
     # -----------------------------------------------------------------------
     # sokrypton fork -- REQUIRED for inference.dump_pdb (FR-16, FR-17).
@@ -84,25 +102,28 @@ From: rosettacommons/rfdiffusion
     #   2. two images (Q3=B): colabdesign.sif on a CUDA 12 base
     # See infrastructure-design.md section 3.
     # -----------------------------------------------------------------------
-    pip install --no-cache-dir "nvidia-cudnn-cu11==8.6.0.163"
+    python3.9 -m pip install --no-cache-dir "nvidia-cudnn-cu11==8.6.0.163"
 
-    pip install --no-cache-dir \
+    python3.9 -m pip install --no-cache-dir \
         "jax==0.4.25" \
         "jaxlib==0.4.25+cuda11.cudnn86" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
-    pip install --no-cache-dir "opt_einsum_fx"
+    python3.9 -m pip install --no-cache-dir "opt_einsum_fx"
 
     CD_SHA=e31a56fe1d9b4de25c8697f3a28b75892941cc72
-    pip install --no-cache-dir --no-deps \
+    python3.9 -m pip install --no-cache-dir --no-deps \
         "git+https://github.com/sokrypton/ColabDesign.git@${CD_SHA}"
     # ColabDesign's own runtime needs, installed explicitly so --no-deps above
     # cannot silently pull a different jax and undo the pin.
-    pip install --no-cache-dir "py3Dmol" "joblib" "chex" "optax" "dm-haiku" "immutabledict"
+    python3.9 -m pip install --no-cache-dir "py3Dmol" "joblib" "chex" "optax" "dm-haiku" "immutabledict"
 
     echo "${CD_SHA}" > /opt/ColabDesign.sha
 
     mkdir -p /opt/rfdgui /opt/weights /opt/outputs /scratch
+
+    # Bind-mount points and build scratch cleanup.
+    rm -rf /opt/buildtmp
 
 %environment
     export DGLBACKEND=pytorch
