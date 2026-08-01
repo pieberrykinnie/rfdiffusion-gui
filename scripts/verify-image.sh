@@ -98,11 +98,18 @@ fi
 sect "4. JAX imports and sees the GPU (known CUDA-11 risk)"
 OUT=$($RUN $VPY -c "
 import jax
+from importlib.metadata import version
 print('jax', jax.__version__)
+print('jaxlib', version('jaxlib'))
 print('devices', jax.devices())
 " 2>&1)
 printf '%s\n' "$OUT" | sed 's/^/    /'
 if printf '%s' "$OUT" | grep -q '^jax '; then
+  if printf '%s' "$OUT" | grep -q '^jaxlib .*cuda'; then
+    ok "jaxlib is a CUDA build (pin survived dependency resolution)"
+  else
+    bad "jaxlib is NOT a CUDA build -- a dependency replaced the pinned wheel. Rebuild."
+  fi
   if printf '%s' "$OUT" | grep -qi 'cuda\|gpu'; then
     ok "JAX imports and reports a GPU device"
   else
@@ -141,7 +148,13 @@ sect "7. Model assets visible"
 for f in Base_ckpt.pt Complex_base_ckpt.pt Complex_beta_ckpt.pt; do
   if $RUN test -s "/opt/RFdiffusion/models/$f"; then ok "in image: $f"; else bad "missing from image: $f -- rebuild"; fi
 done
-if $RUN test -d /opt/schedules-seed; then ok "in image: schedules seed"; else bad "missing from image: /opt/schedules-seed -- rebuild"; fi
+# Schedules are generated on demand into writable scratch; assert the symlink
+# points where the job will bind $TMPDIR.
+if $RUN readlink /opt/RFdiffusion/schedules 2>/dev/null | grep -q '/scratch/schedules'; then
+  ok "schedules -> /scratch/schedules (writable at run time)"
+else
+  bad "schedules symlink wrong -- fork would try to write into the read-only image"
+fi
 if $RUN test -x /opt/weights/bin/ananas; then ok "present: ananas (symmetry=auto available)"; else printf '  [ WARN ] ananas missing -- symmetry="auto" will be unavailable\n'; fi
 if $RUN test -d /opt/weights/alphafold; then ok "present: alphafold params"; else bad "missing: alphafold params"; fi
 

@@ -461,6 +461,50 @@ there for uncached `T` values. A SIF is read-only at run time, so:
   invoking `run_inference.py`. `os.mkdir` on a dangling symlink raises `FileExistsError`, so this
   cannot be left to the fork.
 
+### 8.1e ⚠️ The CUDA jaxlib pin was silently clobbered — and the dead schedules URL
+
+Fourth build. Everything through ColabDesign succeeded, but the log contained this:
+
+```
++ uv pip install ... py3Dmol joblib chex optax dm-haiku immutabledict
+ - jax==0.4.25
+ + jax==0.4.30
+ - jaxlib==0.4.25+cuda11.cudnn86
+ + jaxlib==0.4.30
+```
+
+**This is the most dangerous failure so far, because it was not a failure.** The extras install pulled
+a newer `jax`, and uv correspondingly replaced `jaxlib 0.4.25+cuda11.cudnn86` with the **generic
+`jaxlib 0.4.30`** — a **CPU-only wheel**. Had the build completed, it would have produced an image
+that looks correct and in which **JAX silently has no GPU**. AlphaFold validation would have run on
+CPU at a small fraction of the expected speed, with no error anywhere.
+
+The `--no-deps` on ColabDesign was the right instinct applied to the wrong package: the threat came
+from the *extras* install that existed precisely to compensate for that `--no-deps`.
+
+**Fixes**:
+1. **One resolution pass.** `jax`, `jaxlib`, and every jax-dependent extra are installed in a single
+   `uv pip install` with the pins present, so an incompatibility surfaces as a **loud conflict**
+   rather than a silent downgrade. Extras pinned to versions verified via PyPI `requires-dist` to
+   accept jax 0.4.25 on Python 3.9 (`chex==0.1.86` needs `jax>=0.4.16`; `optax==0.2.2` declares no
+   jax bound; `dm-haiku==0.0.12` constrains jax only under its optional `[jax]` extra).
+2. **A build-time guard that fails the build** if `importlib.metadata.version("jaxlib")` does not
+   contain `cuda`. A CUDA wheel reports `0.4.25+cuda11.cudnn86`; the CPU wheel reports a bare
+   `0.4.30`. This is the check that would have caught the clobbering, and it now runs on every build.
+3. **`verify-image.sh` check 4 asserts the same thing at run time**, so a bad image cannot pass
+   verification either.
+
+**Generalisable lesson**: when a package is pinned to a *local version* (`+cuda11.cudnn86`), any
+later resolution that touches its dependents can silently swap it for the upstream build of the same
+version series. Pin such packages in the **same** resolution as everything that constrains them, and
+assert the local version afterwards.
+
+**Also fixed in this round — dead URL**: `https://files.ipd.uw.edu/krypton/schedules.zip` now returns
+**404** (verified 2026-08-01), which is what `wget` exit 8 reported. Pre-seeding diffusion schedules
+was only ever an optimisation — the `Diffuser` computes and caches any missing schedule. The seed is
+removed; `/opt/RFdiffusion/schedules` remains a symlink to writable `/scratch/schedules`, and the
+cost is a one-time CPU schedule generation per distinct `T`.
+
 ### 8.2 Remaining fallbacks
 
 If a staged `--fakeroot` build still fails: (1) Sylabs remote build `--remote`; (2) local

@@ -43,7 +43,7 @@ From: rosettacommons/rfdiffusion
     Torch        1.12.1+cu116
     RFdiffusion  sokrypton/RFdiffusion@597d37f2a686e23941440fddf6daa4cb778e7bc7
     ColabDesign  sokrypton/ColabDesign@e31a56fe1d9b4de25c8697f3a28b75892941cc72
-    JaxLib       0.4.25+cuda11.cudnn86
+    JaxLib       0.4.25+cuda11.cudnn86 (CUDA build enforced by a build-time guard)
     GPUSupport   sm_70 (V100), sm_80 (A30) -- NOT sm_89 (L40s)
 
 %post
@@ -122,22 +122,53 @@ From: rosettacommons/rfdiffusion
     # -----------------------------------------------------------------------
     uv pip install --python "$VPY" --no-cache "nvidia-cudnn-cu11==8.6.0.163"
 
+    # ONE resolution pass for jax AND everything that depends on it.
+    #
+    # Installing the extras separately does not work: chex/optax/dm-haiku pull
+    # a newer jax, and uv then REPLACES jaxlib 0.4.25+cuda11.cudnn86 with the
+    # generic jaxlib 0.4.30 -- a CPU-only wheel. The build still "succeeds" and
+    # silently produces an image where JAX has no GPU. Resolving everything
+    # together forces any incompatibility to surface as a loud conflict here
+    # instead.
+    #
+    # Extras pinned to versions verified (via PyPI requires-dist) to accept
+    # jax 0.4.25 on Python 3.9: chex 0.1.86 needs jax>=0.4.16; optax 0.2.2
+    # declares no jax bound; dm-haiku 0.0.12 constrains jax only under its
+    # optional [jax] extra.
     uv pip install --python "$VPY" --no-cache \
         "jax==0.4.25" \
         "jaxlib==0.4.25+cuda11.cudnn86" \
+        "opt_einsum_fx" \
+        "py3Dmol" "joblib" "immutabledict" \
+        "chex==0.1.86" "optax==0.2.2" "dm-haiku==0.0.12" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
-    uv pip install --python "$VPY" --no-cache "opt_einsum_fx"
-
+    # ColabDesign last, with --no-deps, so it cannot perturb the set above.
     CD_SHA=e31a56fe1d9b4de25c8697f3a28b75892941cc72
     uv pip install --python "$VPY" --no-cache --no-deps \
         "git+https://github.com/sokrypton/ColabDesign.git@${CD_SHA}"
-    # ColabDesign's own runtime needs, installed explicitly so --no-deps above
-    # cannot silently pull a different jax and undo the pin.
-    uv pip install --python "$VPY" --no-cache \
-        "py3Dmol" "joblib" "chex" "optax" "dm-haiku" "immutabledict"
 
     echo "${CD_SHA}" > /opt/ColabDesign.sha
+
+    # -----------------------------------------------------------------------
+    # HARD GUARD: fail the BUILD if jaxlib is not the CUDA build.
+    #
+    # This is the assertion that would have caught the clobbering above. A
+    # CUDA jaxlib reports a local version like "0.4.25+cuda11.cudnn86"; the
+    # CPU wheel reports a bare "0.4.30". Without this check the image builds
+    # fine and the problem only appears later as "JAX sees no GPU".
+    # -----------------------------------------------------------------------
+    "$VPY" - <<'GUARD'
+from importlib.metadata import version
+v = version("jaxlib")
+print("jaxlib installed version:", v)
+if "cuda" not in v:
+    raise SystemExit(
+        f"FATAL: jaxlib is '{v}', not a CUDA build. Something in the dependency "
+        "set replaced the pinned +cuda11.cudnn86 wheel. Do not ship this image."
+    )
+print("OK: jaxlib is a CUDA build")
+GUARD
 
     # -----------------------------------------------------------------------
     # MODEL CHECKPOINTS ARE ALREADY IN THE BASE IMAGE.
@@ -158,20 +189,22 @@ From: rosettacommons/rfdiffusion
     # -----------------------------------------------------------------------
     # DIFFUSION SCHEDULES.
     #
-    # The fork caches schedules in {SCRIPT_DIR}/../schedules and WRITES there
-    # when a requested T is not cached. A SIF is read-only at run time, so that
-    # directory must live on writable scratch. We ship a pre-computed seed and
-    # symlink the location the fork expects onto /scratch (bound from $TMPDIR).
+    # The fork caches schedules in {SCRIPT_DIR}/../schedules, creating that
+    # directory at import and WRITING to it whenever a requested T is not
+    # already cached. A SIF is read-only at run time, so the directory must
+    # live on writable scratch -- hence the symlink onto /scratch, which the
+    # job binds from $TMPDIR.
     #
-    # The runner (U2b) is responsible for creating /scratch/schedules and
-    # copying the seed into it before invoking run_inference.py -- the fork
-    # does os.mkdir() on this path at import time, which would fail on a
-    # dangling symlink.
+    # NO PRE-SEEDING. The notebook downloaded schedules.zip from
+    # files.ipd.uw.edu/krypton/schedules.zip, but that URL now returns 404 --
+    # verified 2026-08-01. It was only ever an optimisation: the Diffuser
+    # computes any missing schedule and caches it. The cost is a one-time
+    # generation per distinct T value, on CPU, at the start of a run.
+    #
+    # U2b requirement: the runner must `mkdir -p /scratch/schedules` before
+    # invoking run_inference.py. The fork calls os.mkdir() on this path, which
+    # raises FileExistsError on a dangling symlink.
     # -----------------------------------------------------------------------
-    mkdir -p /opt/schedules-seed
-    wget -q -O /opt/schedules.zip https://files.ipd.uw.edu/krypton/schedules.zip
-    ( cd /opt/schedules-seed && python3 -c "import zipfile,sys; zipfile.ZipFile('/opt/schedules.zip').extractall('.')" )
-    rm -f /opt/schedules.zip
     ln -s /scratch/schedules /opt/RFdiffusion/schedules
 
     mkdir -p /opt/rfdgui /opt/weights /opt/outputs /scratch
@@ -194,7 +227,6 @@ From: rosettacommons/rfdiffusion
     # Checkpoints come from the base image (symlinked into the fork), not from
     # the staged weights directory.
     export RFD_MODELS=/opt/RFdiffusion/models
-    export RFD_SCHEDULES_SEED=/opt/schedules-seed
     export RFD_AF_PARAMS=/opt/weights/alphafold
     export ANANAS_BIN=/opt/weights/bin/ananas
 
@@ -215,5 +247,4 @@ From: rosettacommons/rfdiffusion
     echo "== checkpoints"    && ls /opt/RFdiffusion/models/Base_ckpt.pt \
                                    /opt/RFdiffusion/models/Complex_base_ckpt.pt \
                                    /opt/RFdiffusion/models/Complex_beta_ckpt.pt
-    echo "== schedules seed" && ls /opt/schedules-seed | head -3
     echo "== jax import"     && $PY -c "import jax; print(jax.__version__)"
