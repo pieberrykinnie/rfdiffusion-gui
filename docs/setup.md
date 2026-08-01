@@ -105,6 +105,18 @@ bash scripts/build-image.sh
 
 Expect 15–40 minutes, mostly spent pulling base layers. No GPU is needed to build.
 
+**The script builds on node-local `$TMPDIR`, not in place.** This is deliberate. `--fakeroot` runs
+inside a user namespace that remaps your UID to root; on `root_squash` network storage (both `/home`
+over NFS and `/project` over Lustre) the server maps that back to `nobody`, which cannot traverse a
+`0700` home directory or read your files — so a direct build fails with `permission denied` on the
+definition file before doing any work. Staging to node-local disk sidesteps that, and is the right
+place for a build regardless: it writes tens of thousands of small files, exactly what Grex's docs
+say to keep off the shared filesystem. The finished SIF is copied to `$RFD_IMAGE` before the job ends.
+
+**Note on repository location.** If you cloned into `/project` space
+(`~/projects/<group>/<user>/…`), set `RFD_PROJECT_ROOT` in `.env` to that path — the job script
+bind-mounts it into the container. `build-image.sh` prints the correct value when it finishes.
+
 The image is built `FROM rosettacommons/rfdiffusion` — inheriting a proven, fully pinned
 CUDA 11.6 / torch 1.12.1 / DGL 1.0.2 / e3nn 0.3.3 stack — with the **sokrypton fork** of RFdiffusion
 overlaid at a pinned commit. The fork is required: it is the only one with

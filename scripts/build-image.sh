@@ -65,11 +65,61 @@ else
 fi
 say "Using: $($ENGINE --version)"
 
-mkdir -p "$APPTAINER_CACHEDIR" "$(dirname "$RFD_IMAGE")"
+mkdir -p "$(dirname "$RFD_IMAGE")"
 
-say "Cache dir: $APPTAINER_CACHEDIR"
-say "Target:    $RFD_IMAGE"
+# --- Stage the build onto node-local disk ----------------------------------
+# Two reasons, both important:
+#
+# 1. CORRECTNESS. --fakeroot builds inside a user namespace that remaps your
+#    UID to root. On root_squashed network storage (Lustre /project, NFS /home)
+#    the server maps that root back to `nobody`, which cannot traverse a 0700
+#    home directory or read your files. The build then fails with "permission
+#    denied" on the definition file before it does any work. Node-local disk
+#    has no such remapping.
+#
+# 2. PERFORMANCE. A container build writes tens of thousands of small files --
+#    exactly the metadata-heavy pattern Grex's docs say to keep off the shared
+#    parallel filesystem.
+#
+# $TMPDIR is per-job, node-local, and removed when the job ends, so the
+# finished SIF is copied out before we exit.
+LOCAL=${TMPDIR:-/tmp}
+if [ ! -d "$LOCAL" ] || [ ! -w "$LOCAL" ]; then
+  die "no writable node-local scratch (\$TMPDIR=${TMPDIR:-unset}).
+     Run inside a Slurm allocation so Slurm provides \$TMPDIR."
+fi
+
+BUILD_DIR="${LOCAL}/rfd-build-$$"
+mkdir -p "$BUILD_DIR"
+cleanup() { rm -rf "$BUILD_DIR"; }
+trap cleanup EXIT
+
+# Keep the cache on node-local disk too: it is written under the same fakeroot
+# mapping, and it can transiently grow to the size of the image again -- which
+# would otherwise land against the 100 GB /home quota.
+APPTAINER_CACHEDIR="${BUILD_DIR}/cache"
+SINGULARITY_CACHEDIR="$APPTAINER_CACHEDIR"
+export APPTAINER_CACHEDIR SINGULARITY_CACHEDIR
+mkdir -p "$APPTAINER_CACHEDIR"
+
+cp "$DEF" "${BUILD_DIR}/rfdiffusion.def"
+STAGED_DEF="${BUILD_DIR}/rfdiffusion.def"
+STAGED_SIF="${BUILD_DIR}/rfdiffusion.sif"
+
 say "Definition: $DEF"
+say "Build dir:  $BUILD_DIR  (node-local; avoids fakeroot/root_squash and Lustre metadata load)"
+say "Cache dir:  $APPTAINER_CACHEDIR"
+say "Target:     $RFD_IMAGE"
+
+# Node-local scratch is typically 100-200 GB. Image + cache needs ~25 GB.
+LOCAL_AVAIL_GB=$(df -Pk "$LOCAL" 2>/dev/null | awk 'NR==2{printf "%d", $4/1024/1024}')
+if [ -n "${LOCAL_AVAIL_GB:-}" ]; then
+  if [ "$LOCAL_AVAIL_GB" -lt 25 ]; then
+    die "only ${LOCAL_AVAIL_GB} GB free on node-local scratch; need ~25 GB (image + cache).
+     Request a node with more local disk, or build via the Sylabs remote fallback."
+  fi
+  say "Node-local scratch: ${LOCAL_AVAIL_GB} GB free"
+fi
 
 # --- Quota warning ---------------------------------------------------------
 # The build cache can transiently equal the image size again. On a 100 GB
@@ -81,26 +131,29 @@ fi
 
 say "Building (expect 15-40 minutes; most of it is pulling base layers)"
 set +e
-$ENGINE build --fakeroot "$RFD_IMAGE" "$DEF"
+( cd "$BUILD_DIR" && $ENGINE build --fakeroot "$STAGED_SIF" "$STAGED_DEF" )
 BUILD_RC=$?
 set -e
 
 if [ "$BUILD_RC" -ne 0 ]; then
-  cat >&2 <<'EOF'
+  cat >&2 <<EOF
 
-Build FAILED.
+Build FAILED (exit $BUILD_RC).
+
+If the error was "permission denied" reading the definition file, the build was
+NOT staged to node-local disk -- check that \$TMPDIR was set. This script now
+stages automatically; see the comment above the staging block for why.
 
 Documented fallback chain (infrastructure-design.md section 8):
 
   1. Sylabs remote build (needs a free Sylabs Cloud account):
        singularity remote login
-       singularity build --remote $RFD_IMAGE containers/rfdiffusion.def
+       singularity build --remote "$RFD_IMAGE" containers/rfdiffusion.def
 
   2. Build locally with Docker/Podman, then convert and transfer:
-       docker build -t rfdgui -f containers/Dockerfile .
-       # or: podman build ...
+       podman build -t rfdgui -f containers/Dockerfile .
        singularity build rfdiffusion.sif docker-daemon://rfdgui:latest
-       rsync -avP rfdiffusion.sif grex:$RFD_IMAGE
+       rsync -avP rfdiffusion.sif grex:"$RFD_IMAGE"
 
 If the failure is in the JAX step specifically, see the fallback ladder in
 containers/rfdiffusion.def (%post) -- that is a known risk with a planned
@@ -109,12 +162,22 @@ EOF
   exit "$BUILD_RC"
 fi
 
-say "Build complete"
+say "Build complete -- copying to shared storage"
+# $TMPDIR vanishes when the job ends, so the SIF must be copied out now.
+cp "$STAGED_SIF" "$RFD_IMAGE"
 ls -lh "$RFD_IMAGE"
 
 say "Running the image's built-in %test section"
 $ENGINE test "$RFD_IMAGE" || \
   printf '\nWARNING: %%test reported problems -- run scripts/verify-image.sh on a GPU node for detail.\n'
+
+# Where the repo actually lives matters at run time: the job script bind-mounts
+# it into the container. Surface it now so .env can be set correctly.
+say "Recording project root for bind mounts"
+printf '    RFD_PROJECT_ROOT should be: %s\n' "$ROOT"
+if [ ! -f "${ROOT}/.env" ]; then
+  printf '    (no .env yet -- cp env.example .env and set RFD_PROJECT_ROOT to the path above)\n'
+fi
 
 cat <<EOF
 

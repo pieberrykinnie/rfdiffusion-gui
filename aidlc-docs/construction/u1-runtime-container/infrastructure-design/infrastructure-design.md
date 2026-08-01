@@ -305,19 +305,57 @@ Defaults on `/home` (Q8), every path overridable (NFR-6):
 ## 8. Build Procedure (Q4 = A — Grex `--fakeroot`)
 
 ```bash
-module load singularity
-export APPTAINER_CACHEDIR=$HOME/.cache/apptainer
-mkdir -p "$APPTAINER_CACHEDIR" "$(dirname "$RFD_IMAGE")"
-singularity build --fakeroot "$RFD_IMAGE" containers/rfdiffusion.def
+salloc --partition=skylake --cpus-per-task=4 --mem=16000M --time=0-02:00:00
+bash scripts/build-image.sh
 ```
 
 **Build on a compute node, not a login node** — a multi-GB image build is exactly the "heavy compute"
-login nodes are not for (C-11). An interactive `salloc` on a CPU partition is sufficient; no GPU is
-needed to *build*.
+login nodes are not for (C-11). `build-image.sh` refuses to run on `yak`/`bison`. No GPU is needed to
+*build*.
 
-**If `--fakeroot` fails** (documented as occasionally limited for complex recipes), fall back in this
-order: (1) Sylabs remote build `--remote`; (2) local Docker/Podman in WSL2 then convert and transfer.
-Recorded so a build failure is a known branch, not a blocker.
+### 8.1 ⚠️ `--fakeroot` cannot build from network storage (observed 2026-07-31)
+
+**Symptom**: the first build attempt failed immediately with
+
+```
+FATAL: unable to open file .../containers/rfdiffusion.def: permission denied
+```
+
+— before executing a single build step, on a file the user can read normally.
+
+**Root cause**: `--fakeroot` runs the build inside a **user namespace that remaps the invoking UID to
+root**. On network storage with **`root_squash`** (both Grex `/home` over NFS and `/project` over
+Lustre), the server maps that root identity back to `nobody`. `nobody` cannot traverse a `0700` home
+directory, and is not the file's owner — so the very first `open()` of the definition fails.
+
+This is not specific to complex recipes, and it is not intermittent: **any** `--fakeroot` build whose
+inputs live under root_squashed network storage fails this way. The original design assumed the repo
+would sit in `$HOME`; in practice it was cloned into `/project` space
+(`~/projects/def-cardona/<user>/…`), which made the collision unavoidable.
+
+**Fix (implemented in `build-image.sh`)**: stage the build onto **node-local `$TMPDIR`**, build there,
+then copy the finished SIF to `$RFD_IMAGE`. Specifically:
+
+- definition copied to `$TMPDIR/rfd-build-$$/`
+- `APPTAINER_CACHEDIR` pointed at the same node-local directory
+- SIF built locally, then copied out **before the job ends** (`$TMPDIR` is removed at job exit)
+- `trap cleanup EXIT` removes the staging directory
+
+**This is the correct approach independently of the permission problem.** A container build writes
+tens of thousands of small files, which is precisely the metadata-heavy pattern Grex's documentation
+says to keep off the shared parallel filesystem (G-11, G-14). Node-local scratch is 100–200 GB;
+the build needs ~25 GB, and the script checks this before starting.
+
+**Secondary benefit**: the transient build cache — which can grow to the size of the image again —
+no longer counts against the 100 GB `/home` quota.
+
+**Preflight now detects the precondition**: `preflight-grex.sh` reports the repo's filesystem type
+and `$HOME`'s mode, and warns when a hand-run `--fakeroot` build from that path would fail.
+
+### 8.2 Remaining fallbacks
+
+If a staged `--fakeroot` build still fails: (1) Sylabs remote build `--remote`; (2) local
+Docker/Podman then convert and transfer. Recorded so a build failure is a known branch, not a blocker.
 
 ---
 

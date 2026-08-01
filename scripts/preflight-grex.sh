@@ -108,6 +108,29 @@ if [ -f /proc/sys/user/max_user_namespaces ]; then
   fi
 fi
 
+# --fakeroot remaps your UID to root inside a user namespace. On root_squashed
+# network storage the server maps that back to `nobody`, which cannot traverse
+# a 0700 home directory or read your files -- the build then dies with
+# "permission denied" on the definition file. build-image.sh works around this
+# by staging to node-local $TMPDIR; this check explains why that matters.
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+REPO_FS=$(df -PTh "$REPO" 2>/dev/null | awk 'NR==2{print $2}')
+HOME_MODE=$(stat -c '%a' "$HOME" 2>/dev/null || echo '?')
+printf '  info     repo path: %s\n' "$REPO"
+printf '  info     repo filesystem: %s   $HOME mode: %s\n' "${REPO_FS:-unknown}" "$HOME_MODE"
+case "${REPO_FS:-}" in
+  nfs*|lustre*|beegfs*|gpfs*|cifs*)
+    if [ "$HOME_MODE" = "700" ] || [ "$HOME_MODE" = "750" ]; then
+      warn "repo is on '$REPO_FS' and \$HOME is mode $HOME_MODE -- a direct --fakeroot build here
+           WILL fail with 'permission denied' (root_squash). build-image.sh stages to \$TMPDIR
+           automatically, so this is handled; do not build by hand from this path."
+    else
+      pass "repo on '$REPO_FS'; build-image.sh stages to \$TMPDIR regardless (root_squash safe)"
+    fi
+    ;;
+  *) pass "repo filesystem '${REPO_FS:-unknown}' -- build staging to \$TMPDIR still applied" ;;
+esac
+
 # -------------------------------------------------------------------- 5. Storage
 # ASSUMPTION UNDER TEST: ~15-25 GB baseline fits in the 100 GB /home quota (Q8).
 section "5. Storage and quota"
