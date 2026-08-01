@@ -144,6 +144,24 @@ bash scripts/stage-weights.sh --no-multimer
 Weights are downloaded with `curl`, never `aria2c` — `aria2` needs `apt-get` and there is no root on
 Grex.
 
+**What is *not* staged**, because the container image already supplies it:
+- **RFdiffusion checkpoints** — all nine are baked into the base image and symlinked to
+  `/opt/RFdiffusion/models` (~4 GB you don't download)
+- **Diffusion schedules** — computed on demand and cached in writable scratch
+
+**Expect one warning.** `AnAnaS` will report `NOT AVAILABLE`. Its download URL
+(`files.ipd.uw.edu/krypton/`) was removed upstream and now 404s — the same reason `schedules.zip`
+disappeared. This is **not fatal and staging continues**.
+
+The only consequence is that **`symmetry="auto"` is unavailable**: you must state the symmetry group
+and order explicitly (`cyclic`/`dihedral` + order) instead of having it detected from the template.
+Every other mode works normally. To re-enable auto-detection, obtain the binary from
+<https://team.inria.fr/nano-d/software/ananas/> and either place it at `$RFD_WEIGHTS/bin/ananas`
+(`chmod +x`) or set `RFD_ANANAS_URL` and rerun.
+
+Worth knowing: the original Colab notebook downloads both of these too, so it is now broken in the
+same two respects.
+
 ---
 
 ## 6. Verify

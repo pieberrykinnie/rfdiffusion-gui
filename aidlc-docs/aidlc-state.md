@@ -7,6 +7,22 @@
 - **Current Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
 - **Current Stage**: U1 Code Generation complete → next is U2a Core Domain
 
+## ⚠️ Upstream Bit-Rot: `files.ipd.uw.edu/krypton/` is GONE (404, verified 2026-08-01)
+Two assets the original notebook downloads no longer exist. `/pub/RFdiffusion/` still works.
+
+| Asset | Impact | Resolution |
+|---|---|---|
+| `schedules.zip` | none | Diffuser computes and caches schedules on demand into `/scratch/schedules` |
+| `ananas` | **`symmetry="auto"` unavailable** | Staging is best-effort and non-fatal; `RFD_ANANAS_URL` or manual placement re-enables it |
+
+**Requirement impact — `symmetry="auto"` is conditionally available:**
+- **U4**: the symmetry selector must detect whether `ananas` is present and, if not, disable the
+  `auto` option with an explanatory note. `none` / `cyclic` / `dihedral` are unaffected.
+- **U2b**: `SymmetryDetector` (C-12) must fail with a clear, actionable message when `auto` is
+  requested without the binary — never a bare exception or a silent fallback to no symmetry.
+- **Note**: the original notebook is now broken in these same two respects, so the Colab fallback
+  has partially bit-rotted too.
+
 ## ⚠️ Constraint Carried Into U2b (from U1 build findings)
 - **Runner must seed diffusion schedules before invoking `run_inference.py`.** The image ships a seed
   at `/opt/schedules-seed`; `/opt/RFdiffusion/schedules` is a symlink to `/scratch/schedules`
