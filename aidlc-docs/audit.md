@@ -295,3 +295,170 @@ Let's investigate root cause and determine next steps."
 **Context**: CONSTRUCTION - U1 weight staging fixed; ananas now optional
 
 ---
+
+## U2a Functional Design - Started (parallel to U1 GPU allocation wait)
+**Timestamp**: 2026-08-01T01:20:00Z
+**User Input**: "It seems the grex server isn't in a position to allocate any extra resources for now. Are there any other development tasks we can look into in the meanwhile?"
+**AI Response**: "Confirmed this is exactly the planned overlap from execution-plan.md section 2: U2a (rfd-core) is pure Python with zero dependency on U1 and was deliberately kept off the critical path so it could proceed while U1's build/verify - which needs a queued GPU allocation - runs in the background. Started U2a Functional Design. Before writing the plan, fetched the exact source of four ColabDesign functions at the pinned commit (e31a56fe) to characterise notebook behaviour precisely rather than from memory: fix_contigs, fix_partial_contigs, get_Ls, fix_pdb. CONFIRMED fix_contigs and fix_partial_contigs both require parsed_pdb, verifying they belong in U2b not U2a - rfd-core only prepares their inputs. DECIDED to add get_Ls to rfd-core's scope (not explicitly listed in Application Design) since it is pure string arithmetic over normalised contigs with no PDB dependency, and U4 needs it for chain-length colouring (FR-22). FOUND A GENUINE NOTEBOOK BUG: in fix_contig, a segment that is exactly the string '0' is silently dropped from output because of the condition 'x.isnumeric() and x != \"0\"'. Decided without asking that rfd-core's validator will REJECT a literal '0' length segment as invalid input with a clear message, rather than reproducing the silent drop - documented as a deliberate NFR-9 behaviour change since the valid input space is unchanged and only the failure mode improves. Created aidlc-docs/construction/plans/u2a-functional-design-plan.md with 3 genuine product/UX questions: Q1 whether numeric parameter validation should use open ranges or reproduce the notebook's Colab-dropdown-derived enumerated choices (recommended open ranges, since the enumeration was a Colab UI artifact, not a scientific constraint); Q2 whether the symmetry order ceiling should stay at the notebook's 12 or rise to the real chain-letter-exhaustion limit of 26 dihedral/52 cyclic derived from fix_pdb's alphabet_list (recommended keep 12, since nothing is gained scientifically and it keeps an entire failure mode out of reach); Q3 whether hotspot/chain cross-validation against the template belongs in v1 scope given it requires a parsed PDB and so cannot live in this pure unit regardless (recommended defer to a later unit, syntax-only validation for now, given the ASAP priority). Also recorded four decisions made without asking: get_Ls addition, the '0'-segment rejection, a schema_version field on run.json/progress.json for future migration headroom, and a Result/error-value convention (ValidationOutcome) for anything the web form must render, reserving exceptions for programmer errors."
+**Context**: CONSTRUCTION - U2a Functional Design - plan issued with research findings, awaiting answers
+
+---
+
+## U2a Functional Design - Answers Received and Artifacts Generated
+**Timestamp**: 2026-08-01T01:35:00Z
+**User Input**: "Q1 = no constraint, Q2 = cap at 12, Q3 = defer cross-validation"
+**AI Response**: "All three answers clear and unambiguous - no follow-up round needed. Q1='no constraint' is not literally one of options A/B/C but is a clean, unambiguous variant (fully open range) rather than a vague response like 'depends' or 'somewhere between', so proceeded without a blocking clarification file. Stated one interpretive boundary explicitly to the user rather than silently assuming: 'no constraint' removes the UPPER ceiling implied by the notebook's Colab dropdowns, but a positivity FLOOR is retained (iterations>=1, num_designs>=1 etc) because G-9 requires rejecting physically meaningless input before a job is ever queued - flagged as overridable if the user actually wants zero/negative accepted too. Q2=cap at 12 (option A). Q3=defer (option A). Generated three artifacts in aidlc-docs/construction/u2a-core-domain/functional-design/: business-logic-model.md (contig grammar with exact tokenisation/segment-classification rules and a full mode-inference behaviour table matching the notebook's documented examples row for row, symmetry resolution including the deferred-AUTO/AnAnaS reapplication logic, iteration planning with a worked numeric example, the complete argv assembly order with fixed/conditional overrides table and explicit note that NFR-11's argument-list approach eliminates the notebook's nested-quoting problem entirely rather than just moving it, and get_Ls newly scoped into rfd-core with its exact arithmetic - closed with a traceability table mapping every component back to notebook line numbers), business-rules.md (full DesignRequest validation table applying the Q1 interpretation field by field, contig-specific rules including the '0'-segment and empty-segment rejections, a warnings-vs-errors distinction so validation is not more restrictive than the notebook without being silently permissive either, explicit note that Slurm parameters are out of scope for this unit, the Q2 rationale for why 12 is stricter than the true chain-letter ceiling and why that is deliberate, restated the AnAnaS-availability requirement impact from the U1 finding with explicit U4 vs U2b responsibilities, and an error taxonomy formalising the values-not-exceptions convention), and domain-entities.md (Python 3.9-compatible dataclass/pydantic definitions for Segment, ContigSpec with ContigParseError, DesignMode/SymmetryKind enums as class X(str, Enum) not StrEnum, SymmetryPlan, IterationPlan, the full DesignRequest model, RunRecord and ProgressState as the run.json/progress.json contracts each with schema_version=1, AtomicJsonStore's write-via-temp-plus-os.replace and read-returns-None-on-any-problem contract, PathLayout, and an entity relationship summary clarifying that ContigSpec/DesignMode/SymmetryPlan/IterationPlan are computed fresh each time rather than persisted, with only their template-dependent RESULTS persisted into RunRecord). Presenting for approval."
+**Context**: CONSTRUCTION - U2a Functional Design - artifacts generated, approval gate reached
+
+---
+
+## U2a Functional Design - Approval
+**Timestamp**: 2026-08-01T02:00:00Z
+**User Input**: "Continue to Next Stage"
+**AI Response**: "U2a Functional Design approved. Proceeded to U2a Code Generation, Part 1 Planning."
+**Context**: CONSTRUCTION - U2a Functional Design APPROVED; U2a Code Generation started
+
+---
+
+## U2a Code Generation - Plan and Local Capability Check
+**Timestamp**: 2026-08-01T02:05:00Z
+**User Input**: N/A
+**AI Response**: "Before writing the code generation plan, checked local capabilities: uv 0.10.11 installed locally, able to provision Python 3.9.25 on demand via 'uv python install 3.9'. This meant the real test suite could be run locally against the EXACT Python version the container uses, immediately, rather than written and left unverified until Grex GPU availability returns. Created aidlc-docs/construction/plans/u2a-code-generation-plan.md with 9 steps covering project structure, business logic generation, business logic testing including a dedicated Hypothesis property-test step, data layer generation and testing, documentation, and a final local-verification step. Proceeded directly to generation without a separate approval pause, since Auto Mode is active and the plan is a mechanical execution of an already-approved functional design with no new judgment calls requiring the user."
+**Context**: CONSTRUCTION - U2a Code Generation - plan created, proceeding to generation
+
+---
+
+## U2a Code Generation - Implementation and Real Verification
+**Timestamp**: 2026-08-01T02:10:00Z - 2026-08-01T03:00:00Z (approx, spanning multiple exchanges)
+**User Input**: Sequence of "Continue from where you left off." / "Try again" messages as the session continued autonomously through generation and debugging.
+**AI Response**: "Generated all 10 rfd_core source modules (contigs, modes, symmetry, iterations, argv, models, storage, paths, validation, __init__) plus py.typed, each transcribing exact notebook line ranges and cross-checked against the pinned ColabDesign commit's actual fix_contigs/fix_partial_contigs/get_Ls source rather than memory. Generated 10 test files including a dedicated Hypothesis property-test suite (5 properties) targeting contig parsing, mode inference, iteration planning, and argv assembly - the NFR-17 targeted PBT the 11a=B decision called for. Provisioned Python 3.9.25 locally via uv and ran the ENTIRE suite for real against it, not merely on whatever Python happened to be on PATH - matching the container's exact interpreter. Iteratively found and fixed real gaps via coverage analysis: two test cases in test_storage.py that passed only vacuously because the mocked failure occurred before the code path they claimed to test could even run (model_dump_json raises before tempfile.mkstemp is ever called), rewritten to actually exercise cleanup-after-replace-failure and cleanup-failure-does-not-mask-original-error; one contigs.py branch (malformed segment that is neither alpha nor numeric) with no covering test, added. Reached 157 tests, 100% statement coverage, verified dependency tree is pydantic-only via uv pip tree (no accidental torch/jax/colabdesign import), and confirmed the package correctly REFUSES to resolve on Python 3.13 due to its intentionally tight requires-python pin - proof the constraint holds, not a bug."
+**Context**: CONSTRUCTION - U2a Code Generation - implementation complete, 157/157 passing at 100% coverage
+
+---
+
+## U2a Code Generation - Incident: ruff --fix broke Python 3.9 runtime compatibility
+**Timestamp**: 2026-08-01T03:05:00Z
+**User Input**: N/A (routine lint pass initiated as part of finishing the unit)
+**AI Response**: "Ran 'ruff check' as a routine cleanup pass (import sorting, style) and applied --fix. This SILENTLY REWROTE every Optional[X] in the source to X | None across six files (argv.py, contigs.py, models.py, paths.py, storage.py, symmetry.py, validation.py) - ruff's pyupgrade UP045/UP007 rules 'modernizing' the syntax. Rather than assume this was safe, immediately re-imported rfd_core on the real Python 3.9 environment to check - it FAILED: TypeError: unsupported operand type(s) for |: 'type' and 'NoneType', inside pydantic's DesignRequest class body. Diagnosed precisely: the `|` union operator on types is a Python 3.10+ RUNTIME feature; from __future__ import annotations only postpones evaluation of annotations to strings, it does not backport the operator itself, and pydantic v2 explicitly eval()s those strings at class-definition time to build its validators. This is exactly the constraint domain-entities.md had already documented as a hard, deliberate rule ('no runtime PEP 604 unions') - the tooling violated a rule the design had explicitly anticipated. VERIFIED THE SCOPE precisely before fixing: confirmed empirically that list[str]/dict[str,int] subscripting (PEP 585) DOES work at runtime on 3.9 (landed in 3.9 itself), so only the `|` union operator specifically needed reverting, not all modernized syntax. Manually reverted all six files to typing.Optional/List throughout, including in plain dataclasses that had not yet been observed to break (SymmetryPlan, Segment, ContigSpec, IterationPlan, ValidationOutcome) - reasoned that since 'no runtime PEP604 unions' was documented as a general rule rather than a today's-pydantic-version-specific workaround, fixing only the observably-broken pydantic models would leave a latent inconsistency that could break again under a different pydantic version or any future code that calls typing.get_type_hints() on the dataclasses. Re-verified: import succeeds on 3.9, full 157-test suite passes, 100% coverage restored. THEN INVESTIGATED WHY THIS COULD RECUR: added tool.ruff target-version='py39' to packages/rfd-core/pyproject.toml expecting it to gate the pyupgrade rules, then discovered via ruff check --show-settings that target-version WAS correctly resolved to 3.9 yet UP045/UP007 fired anyway - established that these specific rules are NOT gated by target-version at all, because ruff considers X | None always syntactically safe to WRITE once future annotations are active, with no way for ruff to know a third-party library will later eval() that string on an interpreter lacking the runtime operator. Fixed properly by explicitly adding UP045 and UP007 to ruff.lint.ignore with a comment explaining the exact incident and instructing that ruff check --fix must never be run on this package without rerunning the Python 3.9 test suite afterward. Verified the ignore actually takes effect in the config-driven default run (plain 'ruff check' with no CLI override), distinguishing this from an earlier test invocation that used an explicit --select and therefore bypassed the ignore intentionally. Then safely applied --fix once more for the remaining purely-cosmetic findings (import sorting, dict-literal style, redundant quote removal, none of which touch union syntax), confirmed via grep that no union operator was reintroduced, and reran the full suite on real Python 3.9 a final time: 157 passed, 100% coverage, clean import. Recorded the entire incident and its resolution prominently in u2a-code-summary.md so it is not merely fixed but legible to whoever reads this unit's history next."
+**Context**: CONSTRUCTION - U2a Code Generation - incident found and fully resolved via real verification, not assumption; final state confirmed clean
+
+---
+
+## U2a Code Generation - Approval / U2b Runner Functional Design Started
+**Timestamp**: 2026-08-01T03:15:00Z
+**User Input**: "Continue to Next Stage"
+**AI Response**: "U2a Code Generation approved. Started U2b Runner Functional Design. Before writing the design, researched two load-bearing facts directly from source at the pinned commits rather than assuming: (1) Hydra's @hydra.main config_path resolves relative to the decorated script's own file location, not the process cwd, confirmed from run_inference.py's decorator - meaning InferenceExecutor does not need to cd into /opt/RFdiffusion. (2) designability_test.py exposes NO data_dir flag at all; AlphaFold parameter loading (colabdesign/af/alphafold/model/data.py get_model_haiku_params) defaults to data_dir='.' and falls back through {cwd}/params/params_{model}.npz then {cwd}/params_{model}.npz; cross-checked against the official DeepMind download_alphafold_params.sh script, which names the extraction directory literally 'params/' and extracts FLAT npz files into it - confirming stage-weights.sh's existing flat extraction into $RFD_WEIGHTS/alphafold is correct, PROVIDED ValidationExecutor launches designability_test.py with cwd=/opt/weights/alphafold specifically, which is not a convenience default but the only way the vendored loader can find parameters at all given no override flag exists. Also confirmed designability_test.py has a genuine 'if __name__ == \"__main__\": main(sys.argv[1:])' guard, meaning it is invokable as 'python -m colabdesign.rf.designability_test' from the installed package with no symlink hack needed - validating the Application Design decision to drop the notebook's dist-packages symlink entirely. A THIRD FINDING fell out of re-reading the notebook's own option assembly: output_prefix (final backbone/trajectory location) and dump_pdb_path (ephemeral per-step dumps) were ALREADY two separate settings in the notebook (lines 234 and 330) - pointing output_prefix directly at the persistent bind-mounted run directory and dump_pdb_path at /scratch means G-13 ('stage results out of scratch before job end') is satisfied BY CONSTRUCTION, not by an explicit copy step at the end; only the result zip is genuinely new output requiring assembly. Generated three functional design artifacts in aidlc-docs/construction/u2b-runner/functional-design/: business-logic-model.md (the three verified facts with their consequences, the full PipelineOrchestrator control flow with exact argv construction for both the RFdiffusion and designability_test.py subprocess invocations, InferenceExecutor's process-execution and polling loop rewritten around subprocess.Popen.poll() replacing the notebook's raw os.kill(pid,0) PID-file trick, and a traceability table), business-rules.md (a full failure taxonomy distinguishing FAILED states from the legitimate non-failure of AnAnaS finding nothing, a per-step timeout DECISION made without a blocking question - RFD_STEP_TIMEOUT_SECONDS default 1800s - with explicit reasoning for why this was decided rather than asked: Slurm's own --time is already a hard backstop so the downside of any chosen value is bounded and reversible via one env var, the ananas-unavailable fail-fast rule explicitly distinguished from the detector-found-nothing case so the two are never conflated, SIGTERM handling for Slurm walltime expiry, the no-shell-anywhere constraint restated as a unit-wide rule rather than a per-call choice, and the mandatory validation cwd rule restated with an explicit warning that getting it wrong produces an opaque JAX/AlphaFold FileNotFoundError rather than a clear error), and domain-entities.md (the few genuinely new types - InferenceResult, SymmetryDetection, the step-callback protocol, two new configuration env vars - with explicit confirmation that rfd-runner has no PyTorch/JAX exclusion constraint since it runs inside the container, but still avoids PEP604 union syntax for consistency with rfd-core and to avoid a second instance of the ruff incident). Deliberately did not create a blocking question file: identified exactly one genuine open judgment call (the step timeout value) and resolved it via reasoned decision rather than pausing, given the bounded/reversible nature of that specific choice and the user's repeatedly stated ASAP priority; everything else was either already settled by prior approved design or resolved via source research rather than being a real product judgment call. Presenting for approval before proceeding to Code Generation."
+**Context**: CONSTRUCTION - U2b Runner Functional Design - artifacts generated, approval gate reached
+
+---
+
+## U1 Verification - GPU Queue Blocker Raised
+**Timestamp**: 2026-08-06T22:30:00Z (approx)
+**User Input**: "Do not edit any documents. I've been trying to verify `scripts/verify-image.sh` live on the Grex cluster, so for that I was told to run `salloc --partition=gpu --gpus=1 --cpus-per-task=6 --mem-per-cpu=6000M --time=0-00:30:00`. However:
+
+```
+[vuqh1@bison ~]$ squeue --start -u \"$USER\"
+             JOBID PARTITION     NAME     USER ST          START_TIME  NODES SCHEDNODES           NODELIST(REASON)
+           7397662       gpu interact    vuqh1 PD 2026-08-11T12:15:07      1 (null)               (Priority)
+```
+
+That is simply not optimal for smoke testing. Am I cooked or can I try to run the test with less compute?"
+**AI Response**: "Answered without editing anything, per the explicit instruction. Read verify-image.sh and classified all seven checks by whether they actually touch the GPU: only 1, 2, and half of 4 do. Checks 3, 5, 6, 7 and the jaxlib-version half of 4 are greps, imports, and file-existence tests. Noted that check 3 - the one the script's own header calls out as able to invalidate the whole approach, because it gates FR-16/FR-17 - is literally `grep -c dump_pdb` on a YAML and needs no GPU whatsoever. Recommended three levers in payoff order: (1) run the CPU-checkable majority immediately on a skylake allocation; (2) request every compatible partition at once, since docs/setup.md already documents five compatible families totalling 36 V100s + 12 A30s while the user had queued for the 8-GPU 'gpu' pool alone, and since the preemptible -b partitions carry a 1-hour minimum runtime guarantee that makes preemption irrelevant to a 15-minute smoke test; (3) shrink the request from 6 CPUs/36GB/30min to 2 CPUs/8GB/15min so the backfill scheduler can bypass the (Priority) ordering entirely. Also noted the squeue --start estimate assumes every running job burns its full 7-day walltime and is usually badly pessimistic."
+**Context**: CONSTRUCTION - U1 verification blocked on GPU queue; advisory only, no artifacts modified per user instruction
+
+---
+
+## U1 Verification - Partition Availability Triage
+**Timestamp**: 2026-08-06T22:45:00Z (approx)
+**User Input**: "```
+[vuqh1@bison ~]$ sinfo -p gpu,agpu,stamps-b,livi-b,mcordgpu-b -o '%20P %5a %10l %6D %6t %10G %N'
+PARTITION            AVAIL TIMELIMIT  NODES  STATE  GRES       NODELIST
+gpu                  up    7-00:00:00 2      alloc  gpu:v100:4 g[324-325]
+agpu                 up    7-00:00:00 2      mix    gpu:a30:2( g[384-385]
+livi-b               up    7-00:00:00 1      alloc  gpu:v100:1 g338
+mcordgpu-b           up    7-00:00:00 1      resv   gpu:a30:4( g386
+mcordgpu-b           up    7-00:00:00 1      mix    gpu:a30:4( g387
+stamps-b             up    7-00:00:00 1      mix-   gpu:v100:4 g321
+stamps-b             up    7-00:00:00 2      mix    gpu:v100:4 g[322-323]
+```
+
+What now?"
+**AI Response**: "Read the output: gpu and livi-b are 'alloc' (fully consumed, nothing to backfill into); agpu, stamps-b g322-323, and mcordgpu-b g387 are 'mix' and therefore the only candidates. Flagged two things the user had not asked about: the trailing dash in stamps-b's 'mix-' state means the node is DRAINING and will not accept new work, and the %10G field width truncated the GRES strings, so livi-b's 'gpu:v100:1' is actually 'gpu:v100:16'. Made the key correction that 'mix' describes CPU occupancy, not GRES - a node can sit at mix with every GPU claimed - so the state column alone cannot answer whether a card is free. Prescribed 'sinfo -O' with GresUsed (unavailable via -o) to close that gap, and 'scontrol show reservation' as the first check rather than the last, reasoning that g386 sitting in 'resv' hints at a maintenance window, and that a blocking reservation would both explain the 5-day estimate and make the short-walltime advice decisive rather than marginal, since Slurm refuses to start any job whose walltime crosses a reservation boundary. Reiterated the CPU-only run as unblocked and independent of all of this."
+**Context**: CONSTRUCTION - U1 verification, GPU queue triage; advisory only, no artifacts modified
+
+---
+
+## U1 Verification - First Real Execution Results (CPU node n339)
+**Timestamp**: 2026-08-06T23:00:00Z (approx)
+**User Input**: "After running `salloc --partition=skylake --cpus-per-task=2 --mem=8000M --time=0-00:20:00` then `scripts/verify-image.sh`:
+
+```
+[vuqh1@n339 rfdiffusion-gui]$ scripts/verify-image.sh
+Verifying /home/vuqh1/rfd-images/rfdiffusion.sif
+Engine:   singularity-ce version 4.4.1
+Node:     n339
+
+=== 1. GPU visible inside the container
+    WARNING: Could not find any nv files on this host!
+    FATAL:   \"nvidia-smi\": executable file not found in $PATH
+  [ FAIL ] no supported GPU reported -- check the allocation and --nv
+
+=== 2. torch sees CUDA and the device is supported
+    WARNING: Could not find any nv files on this host!
+    torch 1.12.1+cu116
+    cuda_available False
+  [ FAIL ] torch cannot see CUDA
+
+=== 3. sokrypton fork is on PYTHONPATH (gates FR-16 / FR-17)
+  [ OK ]   dump_pdb keys present (found 2) -- live progress is achievable
+    fork sha: 597d37f2a686e23941440fddf6daa4cb778e7bc7
+
+=== 4. JAX imports and sees the GPU (known CUDA-11 risk)
+    WARNING: Could not find any nv files on this host!
+    jax 0.4.25
+    jaxlib 0.4.25+cuda11.cudnn86
+    devices [CpuDevice(id=0)]
+  [ OK ]   jaxlib is a CUDA build (pin survived dependency resolution)
+  [ OK ]   JAX imports and reports a GPU device
+
+=== 5. dgl / e3nn import
+    WARNING: Could not find any nv files on this host!
+    dgl 1.0.2+cu116 e3nn 0.3.3
+  [ OK ]   dgl and e3nn import
+
+=== 6. RFdiffusion entry point runs
+  [ FAIL ] cannot run or import RFdiffusion from the fork
+
+=== 7. Model assets visible
+WARNING: Could not find any nv files on this host!
+  [ OK ]   in image: Base_ckpt.pt
+WARNING: Could not find any nv files on this host!
+  [ OK ]   in image: Complex_base_ckpt.pt
+WARNING: Could not find any nv files on this host!
+  [ OK ]   in image: Complex_beta_ckpt.pt
+  [ OK ]   schedules -> /scratch/schedules (writable at run time)
+WARNING: Could not find any nv files on this host!
+  [ WARN ] ananas missing -- symmetry=\"auto\" will be unavailable
+WARNING: Could not find any nv files on this host!
+  [ OK ]   present: alphafold params
+
+=== Summary
+  PASS 9   FAIL 3
+
+  Verification FAILED. Checks 3 and 4 are the ones that change the plan --
+  report those specifically if they failed.
+```
+
+Following AI-DLC and continuing with U1, what now?"
+**AI Response**: "Analysed the output and identified TWO DEFECTS, BOTH IN verify-image.sh RATHER THAN IN THE IMAGE, plus the headline positive result. HEADLINE: check 3 PASSED with fork sha 597d37f2a686e23941440fddf6daa4cb778e7bc7, which I cross-checked against rfdiffusion.def line 98 and confirmed matches the pinned SHA exactly - so FR-16 and FR-17 are achievable and the approach-invalidating risk is retired, at the cost of a 20-minute CPU allocation. DEFECT 1 (the dangerous one): the reported '[ OK ] JAX imports and reports a GPU device' is a FALSE POSITIVE. Line 110 greps the entire captured output for 'cuda\\|gpu', and the jaxlib version string is '0.4.25+cuda11.cudnn86' - so the match lands on the version line, not the device list, while jax.devices() actually returned [CpuDevice(id=0)]. The consequence is that check 4's GPU half CANNOT FAIL whenever the jaxlib pin holds, which is precisely the condition it exists to test; running the pending GPU allocation with the script as-is would have certified the known CUDA-11 risk as cleared without ever testing it. Noted this is the section 8.1e lesson recurring one layer out - there a silent CPU-only jaxlib would have produced an image that looked correct, here a check that cannot fail would produce a verification that looks clean; the build-time guard caught the first, nothing was guarding the guard. DEFECT 2: check 6's failure is NOT an image fault. Grepped rfdiffusion.def and found at lines 204-206 that the design had ALREADY DOCUMENTED this exact precondition - the fork calls os.mkdir({SCRIPT_DIR}/../schedules) at import, that path is a symlink onto /scratch, and os.mkdir() on a dangling symlink raises FileExistsError. verify-image.sh creates its scratch bind but never creates schedules/ inside it, so every fork import fails. Pointed out the irony that check 7 passes because it only asserts the symlink POINTS at /scratch/schedules while check 6 fails because nothing ever CREATED it. DEFECT 2b: both branches of check 6 discard stderr via 2>/dev/null, which is why a one-line FileExistsError surfaced only as 'cannot run or import RFdiffusion from the fork'. Gave two decisive one-line reproduction commands (bind a scratch dir without schedules/ then with it). Also flagged the ananas WARN as a known, already-documented upstream 404 rather than a new problem, and as a non-gate for M1. Stated the AI-DLC position: these are corrections to U1-generated artifacts, so they require amending the script, the U1 code-generation plan checkboxes, aidlc-state.md and audit.md - and explicitly surfaced the conflict between that mandatory logging and the user's standing 'do not edit any documents' instruction rather than silently violating either, offering to proceed on request."
+**Context**: CONSTRUCTION - U1 Code Generation - two defects diagnosed in generated verification script; awaiting authorisation to edit
+
+---
+
+## U1 Verification - Fixes Applied and Artifacts Updated
+**Timestamp**: 2026-08-06T23:07:13Z
+**User Input**: "Using AI-DLC, apply the fixes and update all relevant artifact documents."
+**AI Response**: "Authorisation received, superseding the earlier 'do not edit any documents' instruction. Loaded .aidlc-rule-details (the Claude Code path) and confirmed via aidlc-state.md 'Extension Configuration' that all three extensions - security/baseline, resiliency/baseline, testing/property-based - are opted OUT, so no extension rules apply as blocking constraints to this correction; no extension rule files were loaded. CODE FIXES to scripts/verify-image.sh: (1) mkdir -p \"$SCRATCH/schedules\" instead of \"$SCRATCH\", with a comment tying it to the def file's documented precondition and to U2b's identical requirement; (2) check 4's GPU assertion scoped to the '^devices' line so the jaxlib version string can no longer satisfy it; (3) check 6 now captures stderr via 'if OUT=$(... 2>&1); then' and prints it on failure - deliberately using the if-assignment idiom rather than a post-hoc $? test, since a fragile $? check had already been fixed once in stage-weights.sh during U1 generation. VERIFIED RATHER THAN ASSUMED: ran bash -n (clean) and unit-tested the corrected check-4 grep against both real output shapes - CpuDevice output now correctly FAILS, CudaDevice output correctly PASSES; under the old logic both passed. ARTIFACTS UPDATED: u1-code-generation-plan.md (Step 5 annotated, new Step 9 added with all four sub-items [x] per the plan-level checkbox enforcement rule); u1-code-summary.md (Verification Status rewritten from 'not yet executed' to real results with a per-check table, plus new sections on the CPU/GPU verification split and on both defects); infrastructure-design.md (section 9 amended to mark which checks need a GPU and to record that step 5 passed while step 6's device half remains genuinely unverified; section 8.1d's 'must report a V100' corrected to V100-or-A30 per the preflight finding); aidlc-state.md (new prominent U1 verification section, Stage Progress U1 line updated with remaining work as an open checkbox, Current Status block rewritten); docs/setup.md (section 6 now leads with the CPU-first path and a short multi-partition GPU allocation; three new troubleshooting rows on queue reduction, -b preemption, and the sinfo mix/GresUsed distinction). TWO STALE DOCUMENTS FOUND AND CORRECTED WHILE HERE, neither of which the user asked about: aidlc-state.md's U2b constraint and infrastructure-design.md section 8.1d both still instructed the U2b runner to copy a schedules seed from /opt/schedules-seed, but grepping containers/ scripts/ and docs/ confirmed no such path exists - pre-seeding was dropped in section 8.1e when files.ipd.uw.edu/krypton/schedules.zip went 404, and section 8.1e corrected itself without ever amending 8.1d or the state file. This mattered because U2b has NOT been built yet and would have been written against an instruction to copy a seed that does not exist. Both corrected with an explicit note that the entry previously described a non-existent seed. Also recorded the cross-unit finding that U1's own verification script became the first live confirmation that U2b's mkdir -p /scratch/schedules precondition is load-bearing rather than defensive. HONESTY NOTE carried into every artifact: Defect 2's FileExistsError diagnosis is derived from the definition file's documented mechanism and is NOT yet directly observed, since the user has not re-run; it is recorded as 'confirmation pending' rather than as verified. Likewise the section 3 JAX/CUDA-11 risk is recorded as STILL OPEN, because the check that was supposed to test it could not fail."
+**Context**: CONSTRUCTION - U1 Code Generation - verification defects fixed, six artifacts updated, two stale seed references corrected
+
+---

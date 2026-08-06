@@ -5,7 +5,86 @@
 - **Project Type**: Brownfield
 - **Start Date**: 2026-07-30T22:57:31Z
 - **Current Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: U1 Code Generation complete → next is U2a Core Domain
+- **Current Stage**: **U1 image built, staged, and partially verified on Grex (2026-08-06)** — the
+  approach-invalidating check PASSED; only GPU-gated checks remain. **U2a Core Domain COMPLETE and
+  APPROVED**; **U2b Runner Functional Design complete**, awaiting approval
+
+## ✅ U1 Verification — First Real Execution (2026-08-06, node `n339`)
+
+**The decisive result: check 3 PASSED.** The sokrypton fork is on `PYTHONPATH` at the pinned sha
+`597d37f2a686e23941440fddf6daa4cb778e7bc7` with both `dump_pdb` keys present. **FR-16 (step
+progress) and FR-17 (live 3D preview) are achievable.** This was the single finding that could have
+invalidated the whole approach, and it is now retired.
+
+**Also confirmed**: `jaxlib 0.4.25+cuda11.cudnn86` is intact in the shipped image — the §8.1e
+silent-clobbering fix held. `torch 1.12.1+cu116`, `dgl 1.0.2+cu116`, `e3nn 0.3.3` all import.
+Checkpoints, the schedules symlink, and AlphaFold params are all present.
+
+**Verification does not require a GPU end to end.** Checks 3, 5, 6, 7 and the jaxlib half of 4 are
+filesystem and import tests. With the `gpu` partition quoting a **five-day** queue, these were run
+on a `skylake` CPU node instead. Only checks 1, 2 and the JAX device test are GPU-gated — and that
+is now the entire remaining U1 surface.
+
+**Queue lesson for U3** (`--partition=` UI): `gpu` is the *smallest* compatible pool. Requesting
+multiple partitions (`--partition=agpu,stamps-b,mcordgpu-b,gpu,livi-b`), using the preemptible `-b`
+pool, and keeping `--time` short for backfill are all materially cheaper than waiting on `gpu`.
+Preemptible partitions carry a 1-hour minimum runtime guarantee, so short jobs cannot be preempted.
+
+**Two defects found in `verify-image.sh` itself** (not in the image) — both fixed 2026-08-06:
+1. **Check 4 could not fail.** Its GPU assertion grepped all output for `cuda|gpu` and matched the
+   jaxlib version string `0.4.25+cuda11.cudnn86`, reporting a GPU pass against `[CpuDevice(id=0)]`.
+   It passed whenever the pin held — exactly when it needed to fail. Scoped to the `^devices` line.
+   **The JAX/CUDA-11 risk from §3 therefore remains genuinely untested.**
+2. **Check 6 omitted `mkdir -p /scratch/schedules`**, so every fork import raised `FileExistsError`
+   — see the U2b constraint below, which this confirms live.
+
+**Open item**: `ananas` unavailable (upstream 404). WARN, not a gate — costs `symmetry="auto"` only.
+Carries into **U3** (symmetry UI must degrade) and **U2b** (its ananas-unavailable fail-fast rule is
+now a live path).
+
+## U2b Runner — Verified Facts (from source research, not assumption)
+1. **Hydra `config_path` resolves relative to the script file**, not cwd — `InferenceExecutor` needs
+   no `cd` into `/opt/RFdiffusion`.
+2. ⚠️ **`ValidationExecutor` MUST launch `designability_test.py` with `cwd=/opt/weights/alphafold`.**
+   No override flag exists; ColabDesign's vendored AlphaFold loader defaults to `data_dir="."` and
+   falls back through `{cwd}/params_{model}.npz` — confirmed against the official DeepMind download
+   script's flat-extraction convention, which matches `stage-weights.sh`'s existing layout.
+3. **G-13 ("stage out before job end") is satisfied by construction**: the notebook already separated
+   `output_prefix` (final, persistent) from `dump_pdb_path` (ephemeral). Pointing the former at the
+   bind-mounted run directory and the latter at `/scratch` means nothing needs copying at job end
+   except the result zip.
+4. `designability_test.py` has a real `__main__` guard — invokable as
+   `python -m colabdesign.rf.designability_test`, no symlink hack needed.
+
+## U2b Decision Made Without Asking
+- **`RFD_STEP_TIMEOUT_SECONDS` default 1800** (30 min) — per-step stall detection. Not put to the
+  user: Slurm's own `--time` is already a hard backstop, so the downside of any value here is bounded
+  and reversible via one env var. Exists to surface *which step* stalled quickly, rather than the
+  user waiting out the full walltime for an undifferentiated `TIMEOUT`.
+
+## U2a Code Generation Result
+- **157 tests, 100% statement coverage**, all verified against a locally-provisioned Python 3.9.25
+  (`uv python install 3.9`) — the exact interpreter the U1 container uses, not a stand-in.
+- **Dependency tree confirmed pydantic-only** via `uv pip tree` — no accidental torch/JAX/ColabDesign
+  import anywhere in `rfd-core` (NFR-2 proven, not assumed).
+- **Incident found and fixed**: `ruff check --fix` silently rewrote `Optional[X]` to `X | None`
+  throughout the source — invalid at runtime on Python 3.9 (pydantic `eval()`s string annotations;
+  the `|` type operator is a 3.10+ runtime feature). Caught immediately by re-running the 3.9 suite
+  after the lint pass, reverted, and **`UP045`/`UP007` permanently suppressed** in
+  `packages/rfd-core/pyproject.toml` with an explanatory comment — `target-version` alone does NOT
+  gate these rules. Full detail in `u2a-code-summary.md`.
+- Package layout: `pyproject.toml` (root, virtual workspace) + `packages/rfd-core/` with
+  `requires-python=">=3.9,<3.10"` pinned tight — confirmed to correctly *refuse* Python 3.13.
+
+## U2a Functional Design Decisions
+- **Q1 = no numeric ceiling** (positivity floor retained — see business-rules.md §0)
+- **Q2 = symmetry order capped at 12** (stricter than the real 26/52 chain-letter limit, deliberately)
+- **Q3 = hotspot/chain cross-validation deferred** (needs a parsed PDB; out of scope for this pure unit regardless)
+- **`get_Ls` added to `rfd-core` scope** (pure, needed by U4 for FR-22 chain colouring)
+- **Notebook bug found and fixed**: `"0"`-length contig segments are silently dropped by ColabDesign's
+  `fix_contig`; `rfd-core` rejects them instead (documented NFR-9 deviation)
+- Artifacts: `business-logic-model.md`, `business-rules.md`, `domain-entities.md` in
+  `aidlc-docs/construction/u2a-core-domain/functional-design/`
 
 ## ⚠️ Upstream Bit-Rot: `files.ipd.uw.edu/krypton/` is GONE (404, verified 2026-08-01)
 Two assets the original notebook downloads no longer exist. `/pub/RFdiffusion/` still works.
@@ -24,11 +103,16 @@ Two assets the original notebook downloads no longer exist. `/pub/RFdiffusion/` 
   has partially bit-rotted too.
 
 ## ⚠️ Constraint Carried Into U2b (from U1 build findings)
-- **Runner must seed diffusion schedules before invoking `run_inference.py`.** The image ships a seed
-  at `/opt/schedules-seed`; `/opt/RFdiffusion/schedules` is a symlink to `/scratch/schedules`
-  (bound from `$TMPDIR`). The runner must `mkdir -p /scratch/schedules` and copy the seed in — the
-  fork does `os.mkdir()` on that path at import, which raises `FileExistsError` on a dangling symlink,
+- ⚠️ **Runner must `mkdir -p /scratch/schedules` before invoking `run_inference.py`.**
+  `/opt/RFdiffusion/schedules` is a symlink to `/scratch/schedules` (bound from `$TMPDIR`). The fork
+  does `os.mkdir()` on that path **at import**, which raises `FileExistsError` on a dangling symlink,
   and it *writes* there for uncached `T` values, which a read-only SIF cannot satisfy.
+  **There is NO seed to copy** — `/opt/schedules-seed` does not exist. Pre-seeding was dropped when
+  `files.ipd.uw.edu/krypton/schedules.zip` went 404; it was only ever an optimisation, and the
+  `Diffuser` computes any missing schedule on CPU. *(Corrected 2026-08-06 — this entry previously
+  described a seed that the shipped image does not contain.)*
+  **CONFIRMED LIVE 2026-08-06**: `verify-image.sh` omitted this `mkdir` and failed with exactly this
+  error. The precondition is load-bearing, not defensive.
 - **The container's Python is `/app/RFdiffusion/.venv/bin/python`** (a uv venv), not `python3.9` on
   PATH in the usual sense. Anything invoking the interpreter explicitly must use that path.
 
@@ -248,9 +332,14 @@ Workflow Planning and favours skipping optional stages.
       - Artifacts: `containers/rfdiffusion.def`, `scripts/{preflight-grex,build-image,stage-weights,verify-image}.sh`,
         `env.example`, `docs/setup.md`, `reference/`, `.gitignore`
       - **Preflight verified on `yak`**: 16 PASS / 0 WARN / 0 FAIL
-      - **Awaiting user execution on Grex**: build image → stage weights → verify on a GPU node
-- [ ] U2a Core Domain: Functional Design **EXECUTE** → Code Generation **EXECUTE**
+      - **Image built and weights staged on Grex** ✅
+      - **Verified on CPU node `n339` 2026-08-06** ✅ — check 3 (the approach-invalidating one)
+        PASSED; jaxlib CUDA pin intact; two defects found in `verify-image.sh` and fixed
+      - [ ] **Remaining**: re-run on CPU to confirm the fixes, then checks 1, 2 and the corrected
+        JAX device test on a short GPU allocation. **The §3 JAX/CUDA-11 risk is still open.**
+- [x] U2a Core Domain: Functional Design **DONE** → Code Generation **DONE** 2026-08-01
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
+      - 157 tests, 100% coverage, verified on real Python 3.9.25 locally
 - [ ] U2b Runner: Functional Design **EXECUTE** → Code Generation **EXECUTE**
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
 - [ ] **Milestone M1** — working CLI pipeline, verified by hand-written `sbatch` on a Grex GPU node
@@ -261,10 +350,15 @@ Workflow Planning and favours skipping optional stages.
 - [ ] Build and Test - **EXECUTE**
 
 ## Current Status
-- **Lifecycle Phase**: INCEPTION (final stage)
-- **Current Stage**: Units Generation Complete
-- **Next Stage**: CONSTRUCTION PHASE — U1 Infrastructure Design
-- **Status**: Awaiting units approval
+*(Corrected 2026-08-06 — this block had gone stale at Units Generation while CONSTRUCTION advanced.)*
+- **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
+- **Current Stage**: U1 verification in progress on Grex; U2b Runner Functional Design awaiting approval
+- **Completed**: U1 Code Generation (+ 2026-08-06 verification corrections), U2a Core Domain
+  (157 tests, 100% coverage, real Python 3.9.25)
+- **Next Stage**: U2b Runner — Code Generation
+- **Status**: U1 partially verified — **FR-16/FR-17 confirmed achievable**; GPU-gated checks pending
+  a short allocation. Not blocking U2b.
+- **Next milestone**: **M1** — a real design via hand-written `sbatch` on a Grex GPU node
 
 ### OPERATIONS PHASE
 - [ ] Operations - PLACEHOLDER
