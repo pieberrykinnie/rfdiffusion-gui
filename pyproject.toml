@@ -1,0 +1,11 @@
+[tool.uv.workspace]
+members = ["packages/*"]
+
+# This is a virtual workspace root (no [project] table): rfdiffusion-gui is not
+# itself an installable package, just a container for rfd-core, rfd-runner,
+# and rfd-web (DD-1, Application Design Q1=A).
+#
+# rfd-core targets Python 3.9 (the container's interpreter, per U1); rfd-web
+# targets >=3.11 (the login node's system python3 is 3.6.8, unusable -- see
+# docs/setup.md). uv resolves each package's own environment independently;
+# use `uv run --package <name> --python <ver> ...` to be explicit.
