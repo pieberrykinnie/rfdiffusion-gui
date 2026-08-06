@@ -76,6 +76,7 @@ waiting to hit it.
 ### Step 5: Image verification script
 - [x] `scripts/verify-image.sh` — the 7-check list from `infrastructure-design.md` §9 as an
       executable script, ordered so the two approach-invalidating checks run first
+- [x] **Corrected 2026-08-06** after its first real execution exposed two defects — see Step 9
 
 ### Step 6: Environment template
 - [x] `env.example` — every configurable path with `/home` defaults (NFR-6)
@@ -86,6 +87,32 @@ waiting to hit it.
 
 ### Step 8: Code summary
 - [x] `aidlc-docs/construction/u1-runtime-container/code/u1-code-summary.md`
+
+### Step 9: Verification-driven corrections to `verify-image.sh` (added 2026-08-06)
+
+Added after the script's **first real execution** on Grex (`n339`, CPU node — see
+`u1-code-summary.md` §Verification Results). Both defects were in the verification script, not in
+the image. Neither is discoverable by `bash -n`, which is why they survived generation.
+
+- [x] **Defect 1 — check 4 could not fail.** The GPU-device assertion grepped the *entire* captured
+      output for `cuda\|gpu`, and the jaxlib version string is `0.4.25+cuda11.cudnn86`. The match
+      landed on the version line, so the check reported `[ OK ] JAX imports and reports a GPU
+      device` while `jax.devices()` returned `[CpuDevice(id=0)]`. It passed whenever the pin held —
+      precisely when it needed to be able to fail. **Fixed**: scoped the grep to the `^devices`
+      line. Verified against both real output shapes: `CpuDevice` → fail, `CudaDevice` → pass.
+- [x] **Defect 2 — check 6 tripped a precondition the design had already written down.** The fork
+      does `os.mkdir({SCRIPT_DIR}/../schedules)` **at import**, and that path is a symlink onto
+      `/scratch`; `os.mkdir()` on a dangling symlink raises `FileExistsError`. The script created
+      its scratch bind but never `schedules/` inside it, so every fork import failed. **Fixed**:
+      `mkdir -p "$SCRATCH/schedules"`.
+- [x] **Defect 2b — the failure was unreadable.** Check 6 discarded stderr on both branches
+      (`2>/dev/null`), reporting only `cannot run or import RFdiffusion from the fork`. **Fixed**:
+      capture and print stderr on failure.
+- [x] `bash -n` clean; check-4 grep discrimination tested against both device outputs.
+
+**Cross-unit consequence**: Defect 2 is the *first live confirmation* that U2b's documented
+`mkdir -p /scratch/schedules` precondition is load-bearing rather than defensive. U1's own
+verification script became the first consumer to violate it and failed exactly as predicted.
 
 ---
 

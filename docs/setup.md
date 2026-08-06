@@ -166,15 +166,29 @@ same two respects.
 
 ## 6. Verify
 
-In a **GPU** allocation:
+**You do not need a GPU for most of this.** Checks 3, 5, 6, 7 and half of check 4 are filesystem and
+import tests. Since the `gpu` partition can quote multi-day queues, run them on a CPU node first —
+including **check 3, the one that gates live progress**:
 
 ```bash
-salloc --partition=gpu --gpus=1 --cpus-per-task=6 --mem-per-cpu=6000M --time=0-00:30:00
+salloc --partition=skylake --cpus-per-task=2 --mem=8000M --time=0-00:20:00
 ```
+
+Then, for checks 1, 2 and the JAX device test, a **short** GPU allocation. Ask for every compatible
+partition at once and keep the walltime small so the backfill scheduler can slot you in:
+
+```bash
+salloc --partition=agpu,stamps-b,mcordgpu-b,gpu,livi-b --gpus=1 --cpus-per-task=2 --mem-per-cpu=4000M --time=0-00:15:00
+```
+
+Either way:
 
 ```bash
 bash scripts/verify-image.sh
 ```
+
+On a CPU node, expect checks 1, 2 and the JAX device test to FAIL and the script to exit non-zero.
+That is the CPU node, not the image. Everything else is real signal.
 
 Seven checks, ordered so the two that could invalidate the approach run first:
 
@@ -268,7 +282,9 @@ path is a CCDB-deposited key plus a conversation with Grex support.
 | Tunnel asks for Duo every time | `ControlMaster` not configured, or master expired | Check `~/.ssh/config`; re-run `ssh grex` |
 | `uv sync` picks the wrong Python | System python3.6 on PATH | `uv` manages its own; ensure `requires-python` is respected |
 | Quota exceeded | Weights + image + cache | `stage-weights.sh --no-multimer`, or move `RFD_WEIGHTS`/`RFD_OUTPUT_ROOT` to `/project` |
-| Job stuck `PENDING` | GPU queue | Normal. Try `agpu`, or a preemptible `-b` partition |
+| Job stuck `PENDING` | GPU queue | `gpu` is the **smallest** compatible pool (8 GPUs). Pass every compatible partition at once (`--partition=agpu,stamps-b,mcordgpu-b,gpu,livi-b`), cut `--time`, and cut `--cpus-per-task`/`--mem` — short small jobs backfill past higher-priority ones. Check for a blocking maintenance window with `scontrol show reservation` |
+| `-b` partition preemption | Preemptible, open to non-owners | Irrelevant for smoke tests — there is a **1-hour minimum runtime guarantee**, so a 15-minute job cannot be preempted |
+| `sinfo` shows `mix` but nothing starts | `mix` describes CPUs, not GPUs | A node can be `mix` with every GPU taken. Use `sinfo -O 'Partition:14,NodeList:10,StateLong:10,Gres:24,GresUsed:30'` — a trailing `-` on the state (`mix-`) means **draining**, so it will not take new work |
 
 ---
 

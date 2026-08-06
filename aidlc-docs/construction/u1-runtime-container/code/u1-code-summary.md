@@ -156,13 +156,107 @@ belonged; the second removed an unnecessary dependency and a whole class of priv
 All shell scripts pass `bash -n`. The quota parser was unit-tested against both real Grex `quota -s`
 output (→ 99 GB headroom) and the plain-kilobyte format (→ 95 GB).
 
-**Not yet executed**: image build, weight staging, and GPU verification are user-run on Grex. These
-are precisely the long-running, queue-bound steps the execution plan overlaps with U2a development.
+**Image built and weights staged.** First real execution of `verify-image.sh` completed
+**2026-08-06 on `n339`** (a `skylake` CPU node — see §Splitting Verification below).
+
+---
+
+## Verification Results — first real execution (2026-08-06)
+
+Reported **PASS 9 / FAIL 3**. What that actually established:
+
+| Check | Result | Reading |
+|---|---|---|
+| 1 GPU visible | FAIL | Expected — CPU node, no `nvidia-smi` |
+| 2 torch/CUDA | FAIL | Expected — CPU node. `torch 1.12.1+cu116` present, pin correct |
+| **3 sokrypton fork** | **PASS** | `dump_pdb` ×2; sha `597d37f2…` matches the pin in `rfdiffusion.def` |
+| 4 jaxlib is CUDA build | PASS | `jaxlib 0.4.25+cuda11.cudnn86` — **the pin survived resolution** |
+| 4 JAX sees GPU | *false pass* | Defect 1 — reported OK against `[CpuDevice(id=0)]` |
+| 5 dgl / e3nn | PASS | `dgl 1.0.2+cu116`, `e3nn 0.3.3` |
+| 6 RFdiffusion entry point | FAIL | Defect 2 — script's own precondition, **not** an image fault |
+| 7 model assets | PASS ×5, WARN ×1 | Checkpoints, schedules symlink, AlphaFold params. `ananas` absent |
+
+### The result that mattered
+
+**Check 3 passed.** The fork is on `PYTHONPATH` at the pinned commit with both `dump_pdb` keys, so
+**FR-16 (step progress) and FR-17 (live 3D preview) are achievable**. This was ordered first
+precisely because it could invalidate the approach, and it is now retired — at the cost of a
+20-minute CPU allocation, with no GPU involved.
+
+The jaxlib half of check 4 also passed, meaning the §8.1e clobbering fix held in the shipped image.
+**The GPU half of check 4 remains genuinely unverified** — see Defect 1.
+
+### Splitting verification across CPU and GPU
+
+The `gpu` partition estimated a **five-day** queue wait for the documented
+`--gpus=1 --cpus-per-task=6 --mem-per-cpu=6000M --time=0-00:30:00` allocation. Rather than block,
+verification was split: checks 3, 5, 6, 7 and the jaxlib half of 4 are pure filesystem and import
+tests requiring **no GPU at all**, and were run immediately on a `skylake` CPU node.
+
+This is a reusable property of the check ordering, not a workaround — the two approach-invalidating
+checks were placed first, and one of them turns out to need no GPU. Only checks 1, 2 and the JAX
+device test are genuinely GPU-gated. Queue-reduction guidance (multi-partition requests, the
+preemptible `-b` pool, short-walltime backfill) is in `docs/setup.md`.
+
+---
+
+## Verification Script Defects Found and Fixed
+
+Both defects were in `verify-image.sh` itself. Neither is reachable by `bash -n`, which is why both
+survived generation — the script had never been executed against a real image before this run.
+
+### Defect 1 — check 4 could not fail (the dangerous one)
+
+The GPU-device assertion grepped the **whole** captured output for `cuda\|gpu`. The jaxlib version
+string is `0.4.25+cuda11.cudnn86`, so the match landed on the version line and the check reported
+`[ OK ] JAX imports and reports a GPU device` while `jax.devices()` returned `[CpuDevice(id=0)]`.
+
+It passed **whenever the jaxlib pin held** — exactly the situation it exists to test. Run as-is in a
+GPU allocation, it would have certified the known CUDA-11 risk as cleared without testing it.
+
+**Fixed** by scoping the grep to the `^devices` line; jax 0.4.25 reports `CudaDevice` on GPU and
+`CpuDevice` on CPU. Verified against both real output shapes: `CpuDevice` → fail, `CudaDevice` → pass.
+
+This is §8.1e's lesson recurring one layer out. There, a silent CPU-only jaxlib would have produced
+an image that *looked* correct; here, a check that cannot fail would have produced a verification
+that *looked* clean. The build-time guard caught the first. Nothing was guarding the guard.
+
+### Defect 2 — check 6 violated a precondition the design had already written down
+
+The fork calls `os.mkdir({SCRIPT_DIR}/../schedules)` **at import**, and that path is a symlink onto
+`/scratch`. `os.mkdir()` on a dangling symlink raises `FileExistsError`. `verify-image.sh` created
+its scratch bind but never `schedules/` inside it, so every attempt to import the fork failed —
+while check 7 passed, because it only asserts the symlink *points* at `/scratch/schedules`, never
+that anything created it.
+
+`rfdiffusion.def` §schedules documents this exact precondition as a U2b requirement. U1's own
+verification script became its first consumer and violated it.
+
+**Fixed** by `mkdir -p "$SCRATCH/schedules"`. Diagnosed from the definition file's documented
+mechanism; **confirmation pending the next run** (the failure should change from
+`cannot run or import` to a clean pass, and Defect 2b now makes any residual error legible).
+
+### Defect 2b — the failure was unreadable
+
+Check 6 discarded stderr on both branches (`2>/dev/null`), so a one-line `FileExistsError` surfaced
+only as `cannot run or import RFdiffusion from the fork`. **Fixed**: stderr is captured and printed
+on failure.
+
+### Open item — `ananas` unavailable (WARN, not a gate)
+
+`stage-weights.sh` could not fetch `ananas`; `files.ipd.uw.edu/krypton/` is 404 upstream, the same
+bit-rot that killed `schedules.zip`. Correctly a WARN — it costs `symmetry="auto"` only. Supply it
+manually via `RFD_ANANAS_URL` or drop the binary at `$RFD_WEIGHTS/bin/ananas`. **Carries into U3**
+(symmetry UI must degrade gracefully) and **U2b** (the ananas-unavailable fail-fast rule in
+`business-rules.md` is now a live path, not a hypothetical).
 
 ---
 
 ## Next
 
-- **User**: run steps 4–6 of `docs/setup.md` on Grex (build, stage, verify)
-- **In parallel**: U2a `rfd-core` — pure Python, no cluster needed, **Python 3.9-compatible**
-- **Then**: U2b, then milestone M1 (a real design via hand-written `sbatch`)
+- **User**: re-run `verify-image.sh` on CPU to confirm the fixes — expect **PASS 9 / FAIL 3** again,
+  but a *different* three: checks 1, 2 and the JAX device test, all genuinely GPU-gated
+- **Then**: a short GPU allocation (`--time=0-00:15:00`, multi-partition) for those three. This is
+  the only remaining U1 verification surface, and the JAX device test is the real open risk
+- **In parallel**: U2b Runner — Functional Design is complete and awaiting Code Generation
+- **Then**: milestone M1 (a real design via hand-written `sbatch`)

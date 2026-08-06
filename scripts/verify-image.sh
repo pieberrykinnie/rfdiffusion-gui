@@ -37,8 +37,13 @@ module load singularity 2>/dev/null || module load apptainer 2>/dev/null || true
 ENGINE=$(command -v singularity || command -v apptainer)
 [ -n "$ENGINE" ] || { printf 'ERROR: no singularity/apptainer on PATH\n' >&2; exit 1; }
 
+# The fork creates {SCRIPT_DIR}/../schedules AT IMPORT TIME, and that path is a
+# symlink onto /scratch (see rfdiffusion.def %post). os.mkdir() on a dangling
+# symlink raises FileExistsError, so schedules/ must exist inside the bind
+# before anything imports the fork -- the same precondition U2b's runner has to
+# satisfy before invoking run_inference.py.
 SCRATCH="${TMPDIR:-/tmp}/rfd-verify-$$"
-mkdir -p "$SCRATCH"
+mkdir -p "$SCRATCH/schedules"
 trap 'rm -rf "$SCRATCH"' EXIT
 RUN="$ENGINE exec --nv --bind ${RFD_WEIGHTS}:/opt/weights --bind ${SCRATCH}:/scratch ${RFD_IMAGE}"
 
@@ -110,7 +115,15 @@ if printf '%s' "$OUT" | grep -q '^jax '; then
   else
     bad "jaxlib is NOT a CUDA build -- a dependency replaced the pinned wheel. Rebuild."
   fi
-  if printf '%s' "$OUT" | grep -qi 'cuda\|gpu'; then
+  # Scope this to the devices line. The jaxlib version string itself contains
+  # "cuda" (0.4.25+cuda11.cudnn86), so matching against the whole output passes
+  # whenever the pin held -- which is exactly when this check needs to be able
+  # to fail. jax 0.4.25 reports CudaDevice on GPU and CpuDevice on CPU.
+  # Extracted first rather than piped grep-into-grep: this script runs under
+  # `set -o pipefail`, where the upstream grep can be SIGPIPEd by `grep -q`
+  # exiting on its first match and poison the pipeline status.
+  DEV=$(printf '%s\n' "$OUT" | grep '^devices' || true)
+  if printf '%s' "$DEV" | grep -qiE 'cuda|gpu'; then
     ok "JAX imports and reports a GPU device"
   else
     bad "JAX imports but reports no GPU (CPU fallback would be very slow).
@@ -135,9 +148,13 @@ if $RUN $VPY /opt/RFdiffusion/run_inference.py --help >/dev/null 2>&1; then
   ok "run_inference.py --help succeeded"
 else
   # Hydra returns non-zero for --help in some versions; fall back to an import.
-  if $RUN $VPY -c "import sys; sys.path.insert(0,'/opt/RFdiffusion'); import inference.utils" 2>/dev/null; then
+  # Keep stderr: this check has no other way to say *why* it failed. Its first
+  # real failure reported only "cannot run or import", which was not enough to
+  # tell an image fault from the missing /scratch/schedules above.
+  if OUT=$($RUN $VPY -c "import sys; sys.path.insert(0,'/opt/RFdiffusion'); import inference.utils" 2>&1); then
     ok "inference.utils imports (Hydra --help exit code is not meaningful here)"
   else
+    printf '%s\n' "$OUT" | sed 's/^/    /'
     bad "cannot run or import RFdiffusion from the fork"
   fi
 fi

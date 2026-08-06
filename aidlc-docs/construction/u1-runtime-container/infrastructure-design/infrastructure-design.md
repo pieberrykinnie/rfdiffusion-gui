@@ -455,11 +455,16 @@ was correct. jaxlib `cuda11.cudnn86` needs ≥ 8.6, and the base genuinely ships
 **3. Diffusion schedules need writable storage.** `model_runners.py` line 31 does
 `os.mkdir(f'{SCRIPT_DIR}/../schedules')` at import when absent, and `Diffuser(cache_dir=…)` **writes**
 there for uncached `T` values. A SIF is read-only at run time, so:
-- the image ships a pre-computed seed at `/opt/schedules-seed`
+- ~~the image ships a pre-computed seed at `/opt/schedules-seed`~~ — **superseded by §8.1e**: the
+  upstream `schedules.zip` is 404, pre-seeding was only ever an optimisation, and **no seed exists
+  in the shipped image**. The `Diffuser` computes and caches any missing schedule on CPU.
 - `/opt/RFdiffusion/schedules` is a **symlink to `/scratch/schedules`** (bound from `$TMPDIR`)
-- **U2b requirement**: the runner must create `/scratch/schedules` and copy the seed into it before
-  invoking `run_inference.py`. `os.mkdir` on a dangling symlink raises `FileExistsError`, so this
-  cannot be left to the fork.
+- **U2b requirement**: the runner must `mkdir -p /scratch/schedules` before invoking
+  `run_inference.py` (no seed to copy — see above). `os.mkdir` on a dangling symlink raises
+  `FileExistsError`, so this cannot be left to the fork.
+- ⚠️ **Confirmed live 2026-08-06.** `verify-image.sh` omitted this `mkdir` and every fork import
+  failed with exactly this error. The requirement is load-bearing, not defensive — U1's own
+  verification script was its first consumer and its first violator.
 
 ### 8.1e ⚠️ The CUDA jaxlib pin was silently clobbered — and the dead schedules URL
 
@@ -514,10 +519,18 @@ Docker/Podman then convert and transfer. Recorded so a build failure is a known 
 
 ## 9. Verification (U1 definition of done)
 
-Run on a `gpu`-partition allocation:
+Implemented as `scripts/verify-image.sh`. **Amended 2026-08-06 after first execution** — see
+`u1-code-summary.md` §Verification Results.
 
-1. `apptainer exec --nv $RFD_IMAGE nvidia-smi` — GPU visible in container
-2. `apptainer exec --nv $RFD_IMAGE python3.9 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"` — **must report a V100**
+**Only steps 1, 2 and the device half of 6 require a GPU.** Steps 3, 4, 5, 7 and the jaxlib-version
+half of 6 are filesystem and import tests that run on any CPU node. Given that the `gpu` partition
+was quoting a five-day queue, this split is worth using deliberately: **step 5 — the check that
+proves FR-16/FR-17 are achievable — needs no GPU at all**, and passed on a `skylake` node.
+
+Run steps 3–5, 7 on any CPU allocation; run 1, 2, 6 on a short GPU allocation:
+
+1. `apptainer exec --nv $RFD_IMAGE nvidia-smi` — GPU visible in container *(GPU)*
+2. `apptainer exec --nv $RFD_IMAGE python3.9 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"` — **must report a V100 or an A30** (sm_70/sm_80; preflight found the A30 partitions the docs omit — **not** an L40s, which is sm_89) *(GPU)*
 3. `apptainer exec --nv $RFD_IMAGE python3.9 -c "import dgl, e3nn; print(dgl.__version__, e3nn.__version__)"`
 4. `apptainer exec --nv $RFD_IMAGE python3.9 /opt/RFdiffusion/run_inference.py --help`
 5. **`grep -c dump_pdb /opt/RFdiffusion/config/inference/base.yaml` returns 2** — confirms the fork,
@@ -529,6 +542,18 @@ Run on a `gpu`-partition allocation:
 
 Steps 5 and 6 are the ones worth running first — they are the two findings that could invalidate the
 whole approach, and both are cheap.
+
+**Status 2026-08-06**: step 5 **PASSED** (fork at pinned sha `597d37f2…`, `dump_pdb` ×2) — FR-16 and
+FR-17 are achievable. Step 6's jaxlib-pin half **PASSED** (`0.4.25+cuda11.cudnn86` intact in the
+shipped image). Steps 3 and 7-adjacent asset checks passed. **Step 6's device half is still
+genuinely unverified**: the implementing check could not fail (its grep matched the jaxlib version
+string rather than the device list) and has been corrected. Steps 1, 2 and the corrected device test
+are the entire remaining U1 verification surface.
+
+**Two preconditions this section did not state, both discovered by running it**:
+`/scratch/schedules` must exist before *anything* imports the fork (§8.1d), and any check asserting
+a GPU must assert against the device list specifically — a version string containing `cuda` will
+otherwise satisfy it.
 
 ---
 
