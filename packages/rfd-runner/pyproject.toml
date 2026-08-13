@@ -1,0 +1,46 @@
+[project]
+name = "rfd-runner"
+version = "0.1.0"
+description = "In-container pipeline orchestrator for rfdiffusion-gui: drives RFdiffusion backbone generation and ProteinMPNN/AlphaFold validation as a single Slurm job, publishing live progress via rfd-core's run.json/progress.json contracts."
+readme = "README.md"
+requires-python = ">=3.9,<3.10"
+dependencies = [
+    "rfd-core",
+]
+
+# NO torch/JAX/ColabDesign dependency here. Those are provided by the U1 container image
+# (containers/rfdiffusion.def) at fixed pinned versions -- declaring them in this project would
+# make `uv sync` either fail (no matching wheels for a dev machine) or install a DIFFERENT,
+# unpinned stack locally, defeating the entire point of U1's pinning. rfd-runner only ever
+# executes for real inside the container; locally it is verified via injected fakes for every
+# ColabDesign/subprocess call (see src/rfd_runner/_colabdesign.py and the popen_factory/fetch/
+# run_cmd seams throughout).
+
+[tool.uv.sources]
+rfd-core = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rfd_runner"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+# Same hazard as rfd-core (see that package's pyproject.toml for the full incident writeup):
+# this package targets the container's Python 3.9 interpreter, and pydantic (via rfd-core's
+# models) eval()s string annotations at runtime even under `from __future__ import annotations`.
+# UP045/UP007 (Optional[X] -> X | None) are NOT gated by target-version in ruff. Do not remove
+# this ignore without rerunning the test suite on Python 3.9 specifically afterwards.
+ignore = ["UP045", "UP007"]

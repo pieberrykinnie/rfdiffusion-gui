@@ -5,9 +5,9 @@
 - **Project Type**: Brownfield
 - **Start Date**: 2026-07-30T22:57:31Z
 - **Current Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: **U1 image built, staged, and partially verified on Grex (2026-08-06)** — the
-  approach-invalidating check PASSED; only GPU-gated checks remain. **U2a Core Domain COMPLETE and
-  APPROVED**; **U2b Runner Functional Design complete**, awaiting approval
+- **Current Stage**: **U1 fully verified on real GPU hardware (PASS 13/FAIL 0, 2026-08-07)**.
+  **U2a Core Domain COMPLETE and APPROVED**. **U2b Runner Functional Design APPROVED and Code
+  Generation COMPLETE (2026-08-13)** — 74 tests, 97% coverage, awaiting user review/approval
 
 ## ✅ U1 Verification — First Real Execution (2026-08-06, node `n339`)
 
@@ -460,8 +460,22 @@ Workflow Planning and favours skipping optional stages.
 - [x] U2a Core Domain: Functional Design **DONE** → Code Generation **DONE** 2026-08-01
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
       - 157 tests, 100% coverage, verified on real Python 3.9.25 locally
-- [ ] U2b Runner: Functional Design **EXECUTE** → Code Generation **EXECUTE**
+- [x] U2b Runner: Functional Design **DONE** → Code Generation **DONE** 2026-08-13
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
+      - **74 tests, 97% overall coverage — 100% on every module except `_colabdesign.py`** (36%,
+        structurally by design: those are the bridge's own `from colabdesign...` import lines,
+        which only execute inside the real container)
+      - Verified on real Python 3.9.25 locally; `import rfd_runner` succeeds with **zero
+        ColabDesign/torch/JAX/RFdiffusion-fork installed**, direct proof the `_colabdesign.py`
+        bridge-module isolation holds
+      - Testability fix made during generation: `OrchestratorDeps.dump_dir` (defaults to
+        `/scratch`, the container's fixed `$TMPDIR` bind target) — promoted from a bare module
+        constant so the mandatory pre-inference `mkdir schedules` step is testable against
+        `tmp_path` rather than the real filesystem root
+      - Artifacts: `packages/rfd-runner/` (15 source modules, 542 statements), `env.example`
+        (`RFD_STEP_TIMEOUT_SECONDS`, `RFD_POLL_INTERVAL_MS` added), documentation at
+        `aidlc-docs/construction/u2b-runner/code/u2b-code-summary.md`
+      - Awaiting user review/approval of the generated code
 - [ ] **Milestone M1** — working CLI pipeline, verified by hand-written `sbatch` on a Grex GPU node
 - [ ] U3 Slurm Integration and Persistence: Functional Design **EXECUTE** → Code Generation **EXECUTE**
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
@@ -470,20 +484,23 @@ Workflow Planning and favours skipping optional stages.
 - [ ] Build and Test - **EXECUTE**
 
 ## Current Status
-*(Corrected 2026-08-07 — U1 verification is now complete; see below.)*
+*(Corrected 2026-08-13 — U2b Runner code generation is now complete; see below.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: **U1 fully verified** (PASS 13 / FAIL 0 on real GPU hardware). U2b Runner
-  Functional Design awaiting approval — this is now the active stage
-- **Completed**: U1 Code Generation and verification (2026-08-06/07 corrections, six rounds — three
-  CPU, one GPU risk-materialization, one build-time resolver failure, one final GPU confirmation),
-  U2a Core Domain (157 tests, 100% coverage, real Python 3.9.25)
-- **Next Stage**: U2b Runner — Code Generation
+- **Current Stage**: **U2b Runner Code Generation COMPLETE** (74 tests, 97% coverage — 100% outside
+  the structurally-untestable `_colabdesign.py` bridge). Awaiting user review/approval of the
+  generated code before proceeding to Build and Test / Milestone M1
+- **Completed**: U1 Code Generation and verification (2026-08-06/07, six rounds — three CPU, one
+  GPU risk-materialization, one build-time resolver failure, one final GPU confirmation), U2a Core
+  Domain (157 tests, 100% coverage, real Python 3.9.25), U2b Runner Functional Design and Code
+  Generation (74 tests, real Python 3.9.25, zero ColabDesign/torch/JAX installed)
+- **Next Stage**: user review of U2b's generated code, then **Milestone M1** — a real design via
+  hand-written `sbatch` on a Grex GPU node, exercising U1 + U2a + U2b together for the first time
 - **Status**: **U1 is done.** FR-16/FR-17 confirmed achievable (sokrypton fork on PYTHONPATH,
   `dump_pdb` present); the §3 risk this project carried since infrastructure design (`jaxlib 0.4.25`
   needing CUDA ≥ 11.8 against an 11.6.2 base) materialized, was root-caused via JAX's changelog, and
   is now closed — `jax==0.4.7` / `jaxlib==0.4.7+cuda11.cudnn86` / `chex==0.1.82` / `optax==0.1.7`
-  verified on a real NVIDIA A30. Tier 2 (§3, two images) was never needed. **Milestone M1 is
-  unblocked.**
+  verified on a real NVIDIA A30. Tier 2 (§3, two images) was never needed. **U2a and U2b are both
+  code-complete. Milestone M1 is unblocked pending Grex GPU access and user review.**
 - **Next milestone**: **M1** — a real design via hand-written `sbatch` on a Grex GPU node
 
 ### OPERATIONS PHASE
