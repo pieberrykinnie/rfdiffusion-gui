@@ -106,6 +106,31 @@ From: rosettacommons/rfdiffusion
     grep -q 'dump_pdb_path:' /opt/RFdiffusion/config/inference/base.yaml
 
     # -----------------------------------------------------------------------
+    # M1 5th-round finding: inference/model_runners.py's load_checkpoint()
+    # calls `torch.load(self.ckpt_path, weights_only=False, map_location=...)`.
+    # `weights_only` only became a real torch.load() parameter in torch 1.13
+    # (Oct 2022); this project is pinned to torch==1.12.1+cu116 (the base
+    # image's CUDA-11.6 ceiling -- the same ceiling that forced the jax/jaxlib/
+    # dm-haiku/scipy pins above). On 1.12.1, torch.load()'s **pickle_load_args
+    # catch-all silently absorbs any unrecognised kwarg and forwards it
+    # straight to `pickle_module.Unpickler(data_file, **pickle_load_args)`,
+    # which does not accept it: `TypeError: 'weights_only' is an invalid
+    # keyword argument for Unpickler()`. Confirmed by fetching
+    # inference/model_runners.py at the pinned RFD_SHA directly -- the fork's
+    # own call site is the one passing the newer-torch-only kwarg, not
+    # anything in this project's code. torch cannot be bumped to fix this
+    # (1.13+ needs a newer CUDA runtime than 11.6 provides), so the call site
+    # is patched instead: `weights_only=False` is dropped, restoring the plain
+    # `torch.load(path, map_location=...)` signature 1.12.1 actually supports
+    # (equivalent behaviour on 1.12.1, which has no weights_only-restricted
+    # unpickler to opt out of in the first place).
+    sed -i 's/self\.ckpt_path, weights_only=False,/self.ckpt_path,/' \
+      /opt/RFdiffusion/inference/model_runners.py
+    grep -q 'weights_only' /opt/RFdiffusion/inference/model_runners.py && \
+      { echo "FATAL: weights_only patch did not apply cleanly"; exit 1; }
+    "$VPY" -c "import ast; ast.parse(open('/opt/RFdiffusion/inference/model_runners.py').read())"
+
+    # -----------------------------------------------------------------------
     # THE FORK NEEDS TWO PACKAGES THE BASE IMAGE DOES NOT INSTALL.
     #
     # reference/diffusion.py cell 2 (commented out, never executed by the

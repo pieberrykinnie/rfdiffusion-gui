@@ -568,11 +568,57 @@ Workflow Planning and favours skipping optional stages.
         `computation`/`all` extras — no cascading conflict. **Fixed**: `"scipy"` →
         `"scipy==1.12.0"` in `rfdiffusion.def`'s same one-resolution-pass install command. **Not
         yet rebuilt or re-verified.**
-      - **Next action is the user's**: `bash scripts/build-image.sh` (inside a CPU `salloc`, not
-        on a login node) to rebuild with the `scipy==1.12.0` pin, then re-run
+      - ✅ **Rebuild confirmed** (implicit — the fifth execution advanced past every prior failure
+        point with no import error at all). ⚠️ **Fifth real execution (job 7443486, node `g325`)
+        FAILED** — but differently from every prior round: `sbatch` reported `exit code 1`, yet
+        `rfd-m1-smoke-7443486.err` was **completely empty**. This is not a mystery — it is
+        `orchestrator.py`'s designed error-handling contract. `_run_backbone`/`_run_validate`
+        (`packages/rfd-runner/src/rfd_runner/orchestrator.py:112-134,183-199`) catch every
+        anticipated failure (template resolution, symmetry detection, and — most likely here, a
+        FREE-mode smoke test with no template/symmetry — a non-zero exit from the
+        `run_inference.py` subprocess) and write the failure into `RunRecord.error`
+        (`inference_executor.py`'s `InferenceResult.stderr_tail`, the last ~4KB of the crashing
+        subprocess's own stderr) via `record.save(run_dir)`, then `return 1` — **deliberately
+        without printing anything to the job's own stdout/stderr**, so U3/U4 can later surface
+        errors through the queryable `RunRecord` rather than by scraping Slurm logs. The real
+        error text is sitting in `run.json` inside the run directory
+        (`/home/vuqh1/rfd-runs/m1-smoke-20260813T224637Z/run.json` for this run), in the `error`,
+        `exit_code`, `backbone_state`, and `validate_state` fields — not in the `.err` file. Ruled
+        out an import-time crash (would have printed Python's default traceback to stderr
+        regardless, as all four prior rounds did) and a `RunRecord.load` failure (same reasoning,
+        and the `.out` log shows the script reached `nvidia-smi` and the `apptainer exec` line
+        cleanly). **Confirmed via `run.json`**: `backbone_state: "failed"`, `exit_code: 1`, `error`
+        holds the real traceback (from `run_inference.py`'s own subprocess, captured by
+        `InferenceResult.stderr_tail`) — **`TypeError: 'weights_only' is an invalid keyword
+        argument for Unpickler()`**, raised inside `torch.load()` at
+        `/opt/RFdiffusion/inference/model_runners.py:171` (`load_checkpoint`). **Root-caused via
+        source, not guessed**: fetched `inference/model_runners.py` at the pinned `RFD_SHA`
+        (`597d37f2a686e23941440fddf6daa4cb778e7bc7`) directly via `gh api` — the fork's own
+        `load_checkpoint()` calls `torch.load(self.ckpt_path, weights_only=False,
+        map_location=self.device)`. `weights_only` only became a real `torch.load()` parameter in
+        **torch 1.13** (Oct 2022); this project is pinned to **`torch==1.12.1+cu116`**, forced by
+        the same CUDA-11.6 ceiling (base image) that drove every jax/jaxlib/dm-haiku/scipy pin
+        above — torch cannot be bumped to fix this without breaking that ceiling. On 1.12.1,
+        `torch.load()`'s `**pickle_load_args` catch-all silently absorbs the unrecognised
+        `weights_only` kwarg and forwards it straight to `pickle_module.Unpickler(data_file,
+        **pickle_load_args)`, which rejects it — exactly the observed `TypeError`. **Fixed**:
+        patched `containers/rfdiffusion.def` to `sed` the fork's source immediately after
+        clone+checkout (before any other build step touches it), dropping `weights_only=False,`
+        from the `torch.load()` call so it falls back to the plain `torch.load(path,
+        map_location=...)` signature 1.12.1 actually supports — behaviourally equivalent on
+        1.12.1, which has no `weights_only`-restricted unpickler to opt out of in the first place.
+        Added a build-time `grep`/`ast.parse` guard so the build fails loudly if the patch ever
+        stops matching (same "fail the BUILD, not a job three hours from now" pattern already used
+        for the `dump_pdb` keys check immediately above it). Verified the extracted `%post` block
+        is still syntactically valid bash (`bash -n`) after the edit. **Not yet rebuilt or
+        re-verified.**
+      - **Next action is the user's**: `bash scripts/build-image.sh --force` (inside a CPU
+        `salloc`, not on a login node — the image already exists, so `--force` is required this
+        time) to rebuild with the `weights_only` patch, then re-run
         `sbatch scripts/m1-submit.sh <run_dir>` (a fresh `run_dir` from `m1-prepare-run.sh`, or
-        the existing one — `RunRecord` is idempotent to reload) and report back the
-        `sacct`/job-log output again
+        the existing one — `RunRecord` is idempotent to reload) and report back the `sacct`/job-log
+        output, **and if it fails again with a clean exit code and empty `.err`, check `run.json`
+        in the run directory first** — that failure mode is now expected behavior, not a bug.
 - [ ] U3 Slurm Integration and Persistence: Functional Design **EXECUTE** → Code Generation **EXECUTE**
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
 - [ ] U4 Web Application: Code Generation **EXECUTE**
