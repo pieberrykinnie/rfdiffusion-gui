@@ -236,6 +236,24 @@ print("OK: jaxlib is a CUDA build")
 GUARD
 
     # -----------------------------------------------------------------------
+    # rfd-core / rfd-runner's OWN runtime dependency.
+    #
+    # DD-2 (application-design.md): rfd-core and rfd-runner source is
+    # bind-mounted into the container at run time (/opt/rfdgui), not
+    # installed here -- only their dependencies belong in the image. This
+    # project's own packages did not exist yet when this file was first
+    # written, so their one dependency (rfd-core/pyproject.toml:
+    # pydantic>=2.0,<3) was never added -- found live on Milestone M1's
+    # first real Grex GPU execution (2026-08-13):
+    #   ModuleNotFoundError: No module named 'pydantic'
+    # (rfd_runner -> rfd_core -> rfd_core.models -> pydantic, at import).
+    # No interaction with the jax/torch dependency sets above -- installed as
+    # its own independent resolution, exactly matching rfd-core's own pin so
+    # a future rfd-core dependency bump cannot silently drift from the image.
+    # -----------------------------------------------------------------------
+    uv pip install --python "$VPY" --no-cache "pydantic>=2.0,<3"
+
+    # -----------------------------------------------------------------------
     # MODEL CHECKPOINTS ARE ALREADY IN THE BASE IMAGE.
     #
     # The published image bakes in all nine RFdiffusion checkpoints under

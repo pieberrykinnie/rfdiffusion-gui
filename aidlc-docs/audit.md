@@ -684,3 +684,40 @@ Build FAILED (exit 255).
 **Context**: CONSTRUCTION - U2b Code Generation APPROVED; Milestone M1 verification artifacts (scripts/m1-prepare-run.sh, scripts/m1-submit.sh, docs/m1-verification.md) prepared and validated locally; execution on real Grex GPU hardware is the reached gate, requiring the user
 
 ---
+
+## Milestone M1 - First Real Grex Execution - `sacct` Shows FAILED, 1 Second Runtime
+**Timestamp**: 2026-08-13T18:35:00Z (approx, from job timestamps)
+**User Input**: "```
+def-cardo+     vuqh1 7441234      2026-08-13T13:34:56 2026-08-13T13:34:57          6   00:00:01 billing=12,cpu=6,gres/gpu=1,m+   00:00:06                                                        g325      1:0               FAILED
+def-cardo+           7441234.bat+ 2026-08-13T13:34:56 2026-08-13T13:34:57          6   00:00:01 cpu=6,gres/gpu=1,mem=36000M,n+   00:00:06    107128K    107128K          0       g325            g325      1:0               FAILED
+def-cardo+           7441234.ext+ 2026-08-13T13:34:56 2026-08-13T13:34:57          6   00:00:01 billing=12,cpu=6,gres/gpu=1,m+   00:00:06                                                        g325      0:0            COMPLETED
+```"
+**AI Response**: "1-second total runtime meant the failure was early, before any real compute -- asked for the actual job log rather than guessing from `sacct` alone."
+**Context**: CONSTRUCTION - Milestone M1 - first real execution attempt, FAILED, requested job log
+
+---
+
+## Milestone M1 - Job Log - Root Cause Found: `pydantic` Missing From the Image
+**Timestamp**: 2026-08-13T18:40:00Z (approx)
+**User Input**: "```
+Starting run at: Thu Aug 13 13:34:56 CDT 2026
+Job ID: 7441234 on host: g325
+RUN_DIR: /home/vuqh1/rfd-runs/m1-smoke-20260813T183425Z
+[nvidia-smi output: Tesla V100-SXM2-32GB, driver 580.173.02, CUDA 13.0, 0 processes]
+Job finished with exit code 1 at: Thu Aug 13 13:34:57 CDT 2026
+Traceback (most recent call last):
+  ...
+  File \"/opt/rfdgui/packages/rfd-runner/src/rfd_runner/__init__.py\", line 8, in <module>
+    from .contig_normaliser import ContigNormaliser
+  File \"/opt/rfdgui/packages/rfd-runner/src/rfd_runner/contig_normaliser.py\", line 11, in <module>
+    from rfd_core import ContigSpec, DesignMode
+  File \"/opt/rfdgui/packages/rfd-core/src/rfd_core/__init__.py\", line 10, in <module>
+    from .models import DesignRequest, ProgressState, RunOutputs, RunRecord, StageState
+  File \"/opt/rfdgui/packages/rfd-core/src/rfd_core/models.py\", line 13, in <module>
+    from pydantic import BaseModel, Field
+ModuleNotFoundError: No module named 'pydantic'
+```"
+**AI Response**: "Confirmed the good news first: everything upstream of the crash worked exactly as designed -- the job started, `nvidia-smi` shows a real V100 with the correct driver/CUDA visible through `--nv`, `module load singularity` succeeded, `apptainer exec` launched the image, the bind mounts resolved (the traceback's paths are all under `/opt/rfdgui/...`, proving the bind-mount of the host repo worked), and PYTHONPATH correctly found `rfd_runner` and `rfd_core` as bind-mounted source. The crash itself is a straightforward, single-cause import failure: `rfd_core/models.py` imports `pydantic`, `pydantic` is rfd-core's only declared runtime dependency (`packages/rfd-core/pyproject.toml`: `pydantic>=2.0,<3`), and grepped `containers/rfdiffusion.def` for every `uv pip install` line -- confirmed `pydantic` was never one of them. ROOT CAUSE, not a mystery: DD-2 established that rfd-core/rfd-runner source is bind-mounted (not baked into the image) specifically so the image only needs to hold dependencies -- but `rfdiffusion.def` predates both packages (written during U1, before U2a/U2b existed), so this specific dependency was never added when rfd-core's own pyproject.toml declared it. The exact same class of gap as the icecream/pyrsistent miss found during U1 verification (§8.1f) -- a package the image needs to satisfy an import that didn't exist when the image's dependency list was written -- confirming the general lesson from that finding (check every actual import chain, not just the fork's) generalizes to this project's own packages too, not only the fork's. FIXED containers/rfdiffusion.def: added `uv pip install --python \"$VPY\" --no-cache \"pydantic>=2.0,<3\"` as its own independent install (no version-sensitive interaction with the jax/torch dependency sets already pinned), placed after the jaxlib CUDA-build guard and before the model-checkpoint symlink section, with a comment explaining DD-2, the exact ModuleNotFoundError this fixes, and why the version constraint mirrors rfd-core's own pin exactly rather than being chosen independently (so a future rfd-core dependency bump cannot silently drift out of sync with the image). Verified `bash -n` clean on the extracted `%post` block after the edit. Checked for a similar gap in rfd-runner's own pyproject.toml -- confirmed it declares rfd-core as its only dependency (no separate third-party packages), so this one addition covers the whole gap; no second missing package expected. STATED PLAINLY WHAT IS NOT YET TRUE: not yet rebuilt or re-verified -- the image must be rebuilt (`scripts/build-image.sh`) and Milestone M1 re-run (`sbatch scripts/m1-submit.sh <run_dir>`, reusing the same or a fresh run_dir) before this fix is confirmed rather than assumed. Updated aidlc-state.md's Milestone M1 entry to record this finding and the fix, not yet closed."
+**Context**: CONSTRUCTION - Milestone M1 - first real Grex execution FAILED at import (ModuleNotFoundError: pydantic) -- a container/package-manifest drift, not a code defect; root-caused to DD-2/rfdiffusion.def predating rfd-core's existence; fixed by adding the missing dependency; rebuild and re-verification pending
+
+---

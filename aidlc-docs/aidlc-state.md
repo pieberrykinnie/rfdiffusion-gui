@@ -479,7 +479,7 @@ Workflow Planning and favours skipping optional stages.
         until the codebase is at a gate that requires verification on grex")
 - [ ] **Milestone M1** — working CLI pipeline, verified by hand-written `sbatch` on a Grex GPU node.
       **BLOCKED ON REAL GREX HARDWARE — this is the gate.** Verification artifacts prepared
-      2026-08-13, not yet executed:
+      2026-08-13:
       - `scripts/m1-prepare-run.sh` — builds a run directory + minimal `run.json` (an 80-residue
         de novo `DesignMode.FREE` smoke test, `--stage all`), validated locally against the real
         `rfd_core.RunRecord` model (Python 3.9.25) before being written to disk
@@ -490,9 +490,25 @@ Workflow Planning and favours skipping optional stages.
         unit-of-work.md's 5 M1 exit criteria), and an explicit scope-limits section (this smoke
         test exercises `DesignMode.FREE` only — template resolution and AnAnaS/`symmetry=auto`
         are not exercised and remain open for a later spot-check)
-      - **Next action is the user's**: run `bash scripts/m1-prepare-run.sh` then
-        `sbatch scripts/m1-submit.sh <run_dir>` on a Grex login node, and report back the
-        `sacct`/job-log output
+      - ⚠️ **First real execution, 2026-08-07 13:34 CDT (job 7441234, node `g325`, real V100)
+        FAILED, 1-second runtime.** Everything upstream of the crash worked: GPU visible via
+        `--nv`, `module load singularity`, `apptainer exec`, all bind mounts (traceback paths
+        confirm `/opt/rfdgui` resolved correctly), `PYTHONPATH` found `rfd_runner`/`rfd_core` as
+        bind-mounted source. **Root cause: `ModuleNotFoundError: No module named 'pydantic'`** —
+        `rfd_core/models.py` imports `pydantic` (its one declared dependency,
+        `packages/rfd-core/pyproject.toml`), but `containers/rfdiffusion.def` predates rfd-core's
+        existence (written during U1, before U2a/U2b), so it was never added. Same class of gap as
+        the U1 icecream/pyrsistent miss (§8.1f) — a package needed by an import chain that didn't
+        exist when the image's dependency list was written. **Fixed**: added
+        `uv pip install --python "$VPY" --no-cache "pydantic>=2.0,<3"` to `rfdiffusion.def`,
+        pinned to match rfd-core's own constraint exactly. `rfd-runner`'s own pyproject.toml
+        declares no third-party dependency beyond `rfd-core`, so no second gap is expected.
+        **Not yet rebuilt or re-verified.**
+      - **Next action is the user's**: `bash scripts/build-image.sh` (inside a CPU `salloc`, not
+        on a login node) to rebuild with the fix, then re-run
+        `sbatch scripts/m1-submit.sh <run_dir>` (a fresh `run_dir` from `m1-prepare-run.sh`, or
+        the existing one — `RunRecord` is idempotent to reload) and report back the
+        `sacct`/job-log output again
 - [ ] U3 Slurm Integration and Persistence: Functional Design **EXECUTE** → Code Generation **EXECUTE**
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
 - [ ] U4 Web Application: Code Generation **EXECUTE**
@@ -505,7 +521,9 @@ prepared and awaiting execution on real Grex hardware.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
 - **Current Stage**: **Milestone M1 — blocked on real Grex GPU execution.** U1 + U2a + U2b are all
   code-complete and approved. This is the gate: it requires the user to run a hand-written `sbatch`
-  job on a real Grex login/GPU node, which this environment cannot do itself.
+  job on a real Grex login/GPU node, which this environment cannot do itself. **First attempt
+  (2026-08-13, job 7441234) FAILED at import** (`pydantic` missing from the image —
+  `containers/rfdiffusion.def` predates rfd-core; fixed, not yet rebuilt/re-verified).
 - **Completed**: U1 Code Generation and verification (2026-08-06/07, six rounds — three CPU, one
   GPU risk-materialization, one build-time resolver failure, one final GPU confirmation), U2a Core
   Domain (157 tests, 100% coverage, real Python 3.9.25), U2b Runner Functional Design and Code
