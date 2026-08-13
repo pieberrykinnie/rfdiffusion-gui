@@ -113,15 +113,37 @@ is no cuda11 jaxlib release between 0.4.7 and 0.4.8 to try instead.
 
 **A second, cascading problem found before touching the cluster again**: `chex==0.1.86` requires
 `jax>=0.4.16`, incompatible with `jax==0.4.7`. Traced chex's PyPI history to find the newest release
-that still accepts `jax>=0.4.6`: **`chex==0.1.82`**. `optax==0.2.2` and `dm-haiku==0.0.12` needed no
-change (verified each package's real `requires_dist`, not assumed).
+that still accepts `jax>=0.4.6`: **`chex==0.1.82`**.
+
+## ⚠️ U1 — First Build Attempt With the Re-Pin Fails: `optax` Check Was Incomplete
+
+`optax==0.2.2` was left unchanged based on checking only its `jax` bound (`jax>=0.1.55`, satisfied).
+Its **full** `requires_dist` also declares `chex>=0.1.86` unconditionally — a direct conflict with
+`chex==0.1.82` above. The real `uv pip install` caught it immediately, before staging:
+
+```
+x No solution found when resolving dependencies:
+  `-> Because optax==0.2.2 depends on chex>=0.1.86 and you require chex==0.1.82, we can
+      conclude that your requirements and optax==0.2.2 are incompatible.
+```
+
+This is `containers/rfdiffusion.def`'s "one resolution pass" design working as intended — a loud
+failure at build time, not a silently broken image, and cheaper than the GPU-time failure it's
+already prevented once (§8.1g). Re-checked optax's PyPI history for a release contemporary with
+`chex 0.1.82`: **`optax==0.1.7`** (2023-07-26) requires only `chex>=0.1.5` and `jax>=0.1.55`. Also
+checked `dm-haiku==0.0.12`'s *unconditional* `flax>=0.7.1` dependency this time (separate from its
+optional `[jax]` extra, not checked in the first pass) — `flax 0.7.1` requires only `jax>=0.4.2`, so
+`dm-haiku==0.0.12` genuinely needs no change.
 
 **Fixed in `containers/rfdiffusion.def`**: `jax==0.4.7`, `jaxlib==0.4.7+cuda11.cudnn86` (cuDNN 8.6
-kept — that's a separate, already-working fix, untouched), `chex==0.1.82`. **Not yet rebuilt or
-re-verified on GPU.**
+kept — that's a separate, already-working fix, untouched), `chex==0.1.82`, `optax==0.1.7`. **Not yet
+rebuilt or re-verified.**
 
-**If this still fails**: the CUDA-11 ceiling is now firmly established — no more cuda11 options
-exist to try. Next step is Tier 2 of §3: two images, `colabdesign.sif` on a CUDA 12 base.
+**If the build still fails at resolution**: re-derive from `requires_dist` again — check every
+explicitly pinned package's full dependency list, not just the constraint under active suspicion.
+**If it builds but the JAX device check still fails on GPU**: the CUDA-11 ceiling is now firmly
+established — no more cuda11 options exist to try. Next step is Tier 2 of §3: two images,
+`colabdesign.sif` on a CUDA 12 base.
 
 ## U2b Runner — Verified Facts (from source research, not assumption)
 1. **Hydra `config_path` resolves relative to the script file**, not cwd — `InferenceExecutor` needs
@@ -423,15 +445,21 @@ Workflow Planning and favours skipping optional stages.
         fully passing. U1's entire CPU-verifiable surface is clean; the 3 FAILs are exactly the
         predicted GPU-gated set (checks 1, 2, JAX device test)
       - **First real GPU allocation, 2026-08-06** ⚠️ — the §3 risk **materialized**: `jaxlib 0.4.25`
-        requires CUDA ≥ 11.8, this base runs CUDA 11.6.2. Re-pinned to `jaxlib 0.4.7` (the newest
-        cuda11 build below that requirement) + `chex 0.1.82` (forced by the downgrade). Image not
-        yet rebuilt with this fix.
-      - [ ] **Remaining**: rebuild the image, then the same short multi-partition GPU allocation to
+        requires CUDA ≥ 11.8, this base runs CUDA 11.6.2. Re-pinned to `jaxlib 0.4.7` + `chex 0.1.82`.
+      - **First build attempt with that re-pin FAILED at the resolution step** ⚠️ — `optax==0.2.2`'s
+        full dependency list (not just its `jax` bound, which is all that was checked) declares
+        `chex>=0.1.86`, conflicting with `chex==0.1.82`. Caught immediately by `uv`, before staging —
+        the "one resolution pass" design working as intended. Re-pinned `optax==0.1.7`; also checked
+        `dm-haiku`'s unconditional `flax>=0.7.1` dependency this time (missed in the first pass) and
+        confirmed it's compatible. Image not yet rebuilt with this corrected set.
+      - [ ] **Remaining**: rebuild the image with `jax==0.4.7` / `jaxlib==0.4.7+cuda11.cudnn86` /
+        `chex==0.1.82` / `optax==0.1.7`, then the same short multi-partition GPU allocation to
         re-verify —
         `salloc --partition=agpu,stamps-b,mcordgpu-b,gpu,livi-b --gpus=1 --cpus-per-task=2 --mem-per-cpu=4000M --time=0-00:15:00`
-        then `bash scripts/verify-image.sh`. Expect PASS 12/FAIL 0. **If it still fails, the CUDA-11
-        ceiling is exhausted** — go straight to Tier 2 (§3: two images, Q3=B), there is no further
-        cuda11 version to try.
+        then `bash scripts/verify-image.sh`. Expect PASS 12/FAIL 0. **If the build fails again at
+        resolution**, check every pinned package's full `requires_dist`, not just the constraint
+        under suspicion. **If it builds but the device check still fails on GPU, the CUDA-11 ceiling
+        is exhausted** — go straight to Tier 2 (§3: two images, Q3=B).
 - [x] U2a Core Domain: Functional Design **DONE** → Code Generation **DONE** 2026-08-01
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
       - 157 tests, 100% coverage, verified on real Python 3.9.25 locally
@@ -447,16 +475,20 @@ Workflow Planning and favours skipping optional stages.
 ## Current Status
 *(Corrected 2026-08-06 — this block had gone stale at Units Generation while CONSTRUCTION advanced.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: U1 verification — CPU surface fully clean; first GPU allocation exercised the
-  §3 JAX/CUDA-11 risk and it materialized (`jaxlib 0.4.7` re-pin applied, rebuild pending). U2b
-  Runner Functional Design awaiting approval
-- **Completed**: U1 Code Generation (+ 2026-08-06 verification corrections, four rounds — three CPU,
-  one GPU), U2a Core Domain (157 tests, 100% coverage, real Python 3.9.25)
+- **Current Stage**: U1 verification — CPU surface fully clean; §3 JAX/CUDA-11 risk materialized on
+  first GPU allocation; first re-pin attempt (`jaxlib 0.4.7`) hit a second, transitive conflict
+  (`optax`/`chex`) caught at build time; corrected set (`jax==0.4.7`, `jaxlib==0.4.7+cuda11.cudnn86`,
+  `chex==0.1.82`, `optax==0.1.7`) not yet rebuilt. U2b Runner Functional Design awaiting approval
+- **Completed**: U1 Code Generation (+ 2026-08-06 verification corrections, five rounds — three CPU,
+  one GPU, one build-time resolver failure), U2a Core Domain (157 tests, 100% coverage, real
+  Python 3.9.25)
 - **Next Stage**: U2b Runner — Code Generation (not blocked by U1's remaining GPU re-verification)
 - **Status**: U1 nearly verified — **FR-16/FR-17 confirmed achievable**; CPU surface fully clean; the
   §3 risk this project has carried since infrastructure design **has now actually happened**
-  (`jaxlib 0.4.25` needs CUDA ≥ 11.8, base is 11.6.2) and has a verified fix (`jaxlib 0.4.7` +
-  `chex 0.1.82`) awaiting a rebuild and one more short GPU allocation to confirm. Not blocking U2b.
+  (`jaxlib 0.4.25` needs CUDA ≥ 11.8, base is 11.6.2); the first fix attempt was itself incomplete
+  (`optax==0.2.2` requires `chex>=0.1.86`, conflicting with the `chex==0.1.82` downgrade) but was
+  caught by `uv`'s resolver before any cluster time was spent; corrected pin set awaits a rebuild and
+  one more short GPU allocation to confirm. Not blocking U2b.
 - **Next milestone**: **M1** — a real design via hand-written `sbatch` on a Grex GPU node
 
 ### OPERATIONS PHASE

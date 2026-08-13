@@ -60,11 +60,20 @@ bump**, confirmed against the full wheel index — this is the correct pin, not 
 **Downgrading jax alone is not sufficient** — `chex==0.1.86` (pinned for jax 0.4.25) requires
 `jax>=0.4.16`, which 0.4.7 violates. Checked chex's PyPI release history for exactly where that floor
 was introduced: bumped to `jax>=0.4.16` in `chex 0.1.83` (2023-09-20); **`chex 0.1.82`**
-(2023-07-20) is the newest release still requiring only `jax>=0.4.6`. `optax==0.2.2` (`jax>=0.1.55`)
-and `dm-haiku==0.0.12` (jax constraint lives only under an unrequested `[jax]` extra) need no change.
+(2023-07-20) is the newest release still requiring only `jax>=0.4.6`.
+
+**First attempt at this fix was itself incomplete** — `optax==0.2.2` was initially left unchanged
+after checking only its `jax` bound (`jax>=0.1.55`, fine). It also requires `chex>=0.1.86`
+unconditionally, a direct conflict with `chex==0.1.82`, caught immediately by `uv`'s own resolver as
+a loud build-time failure (`No solution found`) — exactly what the "one resolution pass" design
+exists to do, and cheap: caught before staging, let alone before a GPU allocation. Re-checked and
+fixed: **`optax==0.1.7`** (2023-07-26, contemporary with chex 0.1.82) requires only `chex>=0.1.5` and
+`jax>=0.1.55`. Also checked `dm-haiku==0.0.12`'s **unconditional** `flax>=0.7.1` dependency this time
+(not just its optional `[jax]` extra, which this install never requests) — `flax 0.7.1` requires only
+`jax>=0.4.2`, so `dm-haiku==0.0.12` needs no version change.
 
 **Verified pin set for jax 0.4.7**: `jax==0.4.7`, `jaxlib==0.4.7+cuda11.cudnn86`, `chex==0.1.82`,
-`optax==0.2.2`, `dm-haiku==0.0.12` — applied in `containers/rfdiffusion.def`.
+`optax==0.1.7`, `dm-haiku==0.0.12` — applied in `containers/rfdiffusion.def`.
 
 **Remaining fallback if this still fails**: two images (Q3 = B) — `colabdesign.sif` on a CUDA 12
 base. The CUDA-11-only ceiling is now firmly established (0.4.7 is the newest option, full stop), so
@@ -191,7 +200,8 @@ version 11060, but JAX was built against version 11080, which is newer.`
       history for `chex`, `optax`, `dm-haiku` — the exact extras pinned alongside jax 0.4.25 — for
       their declared jax lower bounds. `chex==0.1.86` requires `jax>=0.4.16`, which `jax==0.4.7`
       violates. `chex 0.1.82` (2023-07-20) is the newest chex release still requiring only
-      `jax>=0.4.6`. `optax==0.2.2` and `dm-haiku==0.0.12` need no change (see reasoning above).
+      `jax>=0.4.6`. `optax==0.2.2` and `dm-haiku==0.0.12` believed to need no change (see below —
+      this was wrong for `optax`).
 - [x] `containers/rfdiffusion.def` — the single resolution pass now installs `jax==0.4.7`,
       `jaxlib==0.4.7+cuda11.cudnn86`, `chex==0.1.82`, `optax==0.2.2`, `dm-haiku==0.0.12`. The
       pip-supplied cuDNN 8.6 is unchanged — that problem is orthogonal to the CUDA-version mismatch.
@@ -200,8 +210,34 @@ version 11060, but JAX was built against version 11080, which is newer.`
       the base provides — only a real GPU run can catch that).
 - [x] `bash -n` clean on the extracted `%post` block.
 
-**Not yet rebuilt or re-verified on GPU** — pending the user's next `build-image.sh` →
-`verify-image.sh` cycle, this time on a GPU allocation.
+### Step 12: Build failure — the `optax` check was incomplete (added 2026-08-06, first build attempt with the re-pin)
+
+Step 11's `optax==0.2.2 declares only jax>=0.1.55; no change needed` checked one dependency
+direction only. The actual build failed immediately, at `uv`'s resolution step, before any staging:
+
+```
+x No solution found when resolving dependencies:
+  `-> Because optax==0.2.2 depends on chex>=0.1.86 and you require chex==0.1.82, we can
+      conclude that your requirements and optax==0.2.2 are incompatible.
+```
+
+- [x] `optax==0.2.2`'s **full** `requires_dist` (not just its `jax` line) declares `chex>=0.1.86`
+      unconditionally — a direct conflict with the `chex==0.1.82` pin from Step 11. This is precisely
+      the failure mode the "one resolution pass" design (§8.1e) exists to surface loudly, and it did
+      — at build time, before staging, nowhere near a GPU allocation.
+- [x] Checked optax's PyPI history for a version contemporary with `chex 0.1.82`: **`optax 0.1.7`**
+      (2023-07-26) requires only `chex>=0.1.5` and `jax>=0.1.55` — both satisfied.
+- [x] Learned from the miss and checked **all** transitive constraints this time, not just each
+      package's direct `jax` line: `dm-haiku==0.0.12`'s *unconditional* `flax>=0.7.1` dependency
+      (separate from its optional `[jax]` extra) was never checked in Step 11. `flax 0.7.1` requires
+      only `jax>=0.4.2` — no conflict, `dm-haiku==0.0.12` genuinely needs no change. Also confirmed
+      neither `chex 0.1.82` nor `optax 0.1.7` depends back on the other's replacement in a way that
+      could reopen the conflict (`chex` has no `optax` reference at all; `optax`'s own dependents
+      were re-checked against the final set).
+- [x] `containers/rfdiffusion.def` — `optax==0.2.2` → `optax==0.1.7`. Comment rewritten to record
+      the miss explicitly (why `jax`-only checking wasn't enough) rather than silently correcting it.
+
+**Not yet rebuilt or re-verified** — pending the user's next `build-image.sh` attempt.
 
 ---
 

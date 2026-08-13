@@ -181,16 +181,25 @@ From: rosettacommons/rfdiffusion
     #             that floor to 0.4.16 in 0.1.83 (2023-09-20); 0.1.82
     #             (2023-07-20) is the newest release still requiring only
     #             jax>=0.4.6, so it is pinned here instead.
-    #   optax  -- 0.2.2 declares only jax>=0.1.55; no change needed.
-    #   dm-haiku -- 0.0.12's jax constraint lives entirely under its optional
-    #             [jax] extra, which this install does not request; no change
-    #             needed.
+    #   optax  -- FIRST ATTEMPT WRONG: checked only optax==0.2.2's jax bound
+    #             (jax>=0.1.55, fine) and missed that it ALSO requires
+    #             chex>=0.1.86 unconditionally -- a direct conflict with the
+    #             chex==0.1.82 pin above, caught by `uv`'s own resolver as a
+    #             loud failure at build time (exactly what "one resolution
+    #             pass" exists to do). optax 0.1.7 (2023-07-26, contemporary
+    #             with chex 0.1.82) requires only chex>=0.1.5 and jax>=0.1.55
+    #             -- pinned here instead.
+    #   dm-haiku -- 0.0.12's OWN jax constraint lives entirely under its
+    #             optional [jax] extra, which this install does not request.
+    #             Its unconditional `flax>=0.7.1` dependency was checked too:
+    #             flax 0.7.1 requires only jax>=0.4.2, so no conflict; no
+    #             change needed to the dm-haiku pin itself.
     uv pip install --python "$VPY" --no-cache \
         "jax==0.4.7" \
         "jaxlib==0.4.7+cuda11.cudnn86" \
         "opt_einsum_fx" \
         "py3Dmol" "joblib" "immutabledict" \
-        "chex==0.1.82" "optax==0.2.2" "dm-haiku==0.0.12" \
+        "chex==0.1.82" "optax==0.1.7" "dm-haiku==0.0.12" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
     # ColabDesign last, with --no-deps, so it cannot perturb the set above.

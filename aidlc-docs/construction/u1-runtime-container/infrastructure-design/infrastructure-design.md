@@ -178,8 +178,10 @@ Root-caused to `jax 0.4.8` (2023-03-29 `CHANGELOG.md`: "CUDA 11.4 support has be
 support CUDA 11.8 and CUDA 12") — every cuda11 jaxlib from 0.4.8 onward needs CUDA ≥ 11.8; this base
 is 11.6.2. `jaxlib 0.4.7` is the newest build that predates the bump, paired with `chex==0.1.82`
 (the newest chex release still accepting `jax>=0.4.6` rather than the `>=0.4.16` that `0.1.86`
-requires). Full derivation in §8.1g. **Tier 2 (two images, Q3=B) remains the fallback if 0.4.7 turns
-out to have some other incompatibility with ColabDesign at the pinned commit** — not yet needed.
+requires) and, after a first attempt missed a transitive conflict caught by the real build,
+`optax==0.1.7`. Full derivation, including the missed conflict, in §8.1g. **Tier 2 (two images,
+Q3=B) remains the fallback if this pin set turns out to have some other incompatibility with
+ColabDesign at the pinned commit** — not yet needed.
 
 ---
 
@@ -600,23 +602,48 @@ have reported this as a loud conflict (correctly, per the "one resolution pass" 
 rather than silently succeeding, but it would still have cost a fourth build/verify cycle to
 discover. Checked chex's PyPI release history for exactly where the floor moved: `0.1.82`
 (2023-07-20) still requires only `jax>=0.4.6`; the bump to `jax>=0.4.16` landed in `0.1.83`
-(2023-09-20). `optax==0.2.2` (`jax>=0.1.55`) and `dm-haiku==0.0.12` (jax constraint lives entirely
-under an `[jax]` extra this install never requests) needed no change — confirmed by reading each
-package's actual `requires_dist`, not by assuming the whole extras set would need re-pinning.
+(2023-09-20).
+
+**This round's check of `optax` was itself incomplete, and the real build caught it.** `optax==0.2.2`
+was left unchanged after checking only its `jax` bound (`jax>=0.1.55`, satisfied) — its **full**
+`requires_dist` also declares `chex>=0.1.86` unconditionally, which directly conflicts with the
+`chex==0.1.82` pin just chosen. The actual `build-image.sh` run hit this immediately:
+
+```
+x No solution found when resolving dependencies:
+  `-> Because optax==0.2.2 depends on chex>=0.1.86 and you require chex==0.1.82, we can
+      conclude that your requirements and optax==0.2.2 are incompatible.
+```
+
+This is precisely what §8.1e's "one resolution pass" design exists to do — surface an incompatibility
+as a loud, immediate failure instead of a silent bad image — and it worked exactly as intended: caught
+at the build's dependency-resolution step, before staging even began, nowhere near a GPU allocation.
+Re-checked optax's PyPI history for a version contemporary with `chex 0.1.82`: **`optax 0.1.7`**
+(2023-07-26) requires only `chex>=0.1.5` and `jax>=0.1.55`. This time also checked
+`dm-haiku==0.0.12`'s **unconditional** `flax>=0.7.1` dependency — separate from its optional `[jax]`
+extra, which this install never requests, and not checked in the first pass — confirming `flax 0.7.1`
+requires only `jax>=0.4.2`, so `dm-haiku==0.0.12` genuinely needs no version change.
 
 **Fixed**: `containers/rfdiffusion.def`'s single resolution pass now installs `jax==0.4.7`,
-`jaxlib==0.4.7+cuda11.cudnn86`, `chex==0.1.82`, `optax==0.2.2`, `dm-haiku==0.0.12`. The pip-supplied
+`jaxlib==0.4.7+cuda11.cudnn86`, `chex==0.1.82`, `optax==0.1.7`, `dm-haiku==0.0.12`. The pip-supplied
 `nvidia-cudnn-cu11==8.6.0.163` is **unchanged** — that addresses a different problem (cuDNN version)
 orthogonal to this one (CUDA version), and switching it would have been an unnecessary second
 variable in the same fix. The build-time CUDA-build guard (§8.1e) is unaffected in mechanism but its
 comment now states explicitly what it does **not** catch: it asserts jaxlib *is* a CUDA build, not
-that the CUDA build is *new enough* for the runtime — that distinction is exactly what this defect
-was, and only a real GPU execution (verify-image.sh checks 1/2/4) can catch it.
+that the CUDA build is *new enough* for the runtime — that distinction is exactly what the original
+CUDA-version defect was, and only a real GPU execution (verify-image.sh checks 1/2/4) can catch it.
 
-**Not yet rebuilt or re-verified on GPU** — pending the user's next `build-image.sh` →
-`verify-image.sh` cycle on a GPU allocation. If `jaxlib 0.4.7` surfaces some other incompatibility
-with ColabDesign at the pinned commit, Tier 2 (§3 — two images, Q3=B) is the next and last fallback;
-the CUDA-11-only ceiling established here is unconditional, so there is no Tier 1.5 to try first.
+**Not yet rebuilt or re-verified** — pending the user's next `build-image.sh` →`verify-image.sh`
+cycle. If the full set still fails at the resolution step, re-derive from `requires_dist` again
+rather than guessing; if it resolves and builds but `jaxlib 0.4.7` surfaces some GPU-time
+incompatibility with ColabDesign at the pinned commit, Tier 2 (§3 — two images, Q3=B) is the next and
+last fallback — the CUDA-11-only ceiling established here is unconditional, so there is no Tier 1.5.
+
+**Generalisable lesson, on top of §8.1g's own**: checking only the constraint you are actively
+worried about (here, each package's `jax` bound) is not the same as checking the package's full
+dependency declaration. `optax`'s `chex` requirement was exactly one `pip show`/`requires_dist` read
+away from being caught before the first build attempt. The fix cost one extra build cycle, not a GPU
+cycle — cheap, but avoidable, and worth stating plainly rather than quietly correcting.
 
 **Generalisable lesson, continuing §8.1e/§8.1f's pattern**: a package's local-version wheel tag
 (`+cuda11.cudnn86`) encodes only what its *authors chose to publish in the filename* — here, cuDNN

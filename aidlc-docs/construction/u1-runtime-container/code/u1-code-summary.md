@@ -350,31 +350,53 @@ actually uses — see below).
 **Downgrading jax alone would have failed the next resolution pass**: `chex==0.1.86` requires
 `jax>=0.4.16`; `jax==0.4.7` violates that. Checked chex's PyPI history for exactly where the floor
 moved (bumped in `0.1.83`, 2023-09-20) and picked **`chex==0.1.82`** — the newest release still
-accepting `jax>=0.4.6`. `optax==0.2.2` and `dm-haiku==0.0.12` needed no change: verified each
-package's actual `requires_dist` rather than assuming the whole extras set needed re-pinning.
+accepting `jax>=0.4.6`.
+
+**First build attempt with this fix failed too — the `optax` check was incomplete.**
+`optax==0.2.2` was left unchanged after checking only its `jax` bound (`jax>=0.1.55`, fine); its full
+`requires_dist` also declares `chex>=0.1.86`, directly conflicting with `chex==0.1.82`. The real
+`uv pip install` caught this immediately:
+
+```
+x No solution found when resolving dependencies:
+  `-> Because optax==0.2.2 depends on chex>=0.1.86 and you require chex==0.1.82, we can
+      conclude that your requirements and optax==0.2.2 are incompatible.
+```
+
+This is the "one resolution pass" design working exactly as intended — a loud failure at build time,
+before staging, well short of a GPU allocation. Re-checked optax's PyPI history for a release
+contemporary with `chex 0.1.82`: **`optax==0.1.7`** (2023-07-26) requires only `chex>=0.1.5` and
+`jax>=0.1.55`. This time also checked `dm-haiku==0.0.12`'s **unconditional** `flax>=0.7.1`
+dependency — separate from its optional `[jax]` extra, and not checked in the first pass — and
+confirmed `flax 0.7.1` requires only `jax>=0.4.2`; `dm-haiku==0.0.12` genuinely needs no change.
 
 **Fixed in `containers/rfdiffusion.def`**: `jax==0.4.7`, `jaxlib==0.4.7+cuda11.cudnn86` (kept on
 `cudnn86`, not `cudnn82` — the pip-supplied cuDNN 8.6 already works and switching it would have been
-an unrelated second variable), `chex==0.1.82`. `%labels` and the build-time guard's comments updated
-to match; the guard's comment now states plainly what it can and cannot catch — it asserts jaxlib
-*is* a CUDA build, never that the CUDA build is *new enough* for this runtime.
+an unrelated second variable), `chex==0.1.82`, `optax==0.1.7`. `%labels` and the build-time guard's
+comments updated to match; the guard's comment now states plainly what it can and cannot catch — it
+asserts jaxlib *is* a CUDA build, never that the CUDA build is *new enough* for this runtime.
 
-**Not yet rebuilt or re-verified on GPU.**
+**Not yet rebuilt or re-verified.**
 
 ---
 
 ## Next
 
-- **User**: **rebuild the image** (`scripts/build-image.sh`) to pick up the `jax`/`jaxlib`/`chex`
-  re-pin, then a short multi-partition GPU allocation to re-verify:
+- **User**: **rebuild the image** (`scripts/build-image.sh`) to pick up the corrected
+  `jax`/`jaxlib`/`chex`/`optax` set, then a short multi-partition GPU allocation to re-verify:
   ```bash
   salloc --partition=agpu,stamps-b,mcordgpu-b,gpu,livi-b --gpus=1 --cpus-per-task=2 --mem-per-cpu=4000M --time=0-00:15:00
   ```
   then `bash scripts/verify-image.sh`. Expect **PASS 12 / FAIL 0** if `jaxlib 0.4.7` resolves the
   CUDA mismatch and ColabDesign has no other incompatibility at this older jax version.
-- **If the JAX device check still fails**, the CUDA-11 ceiling is now firmly established at 0.4.7 —
-  there is no Tier 1.5 to try. Go straight to the pre-planned Tier 2 fallback (§3 of
-  `infrastructure-design.md`, Q3 = B): two images, `colabdesign.sif` on a CUDA 12 base.
+- **If the build still fails at the resolution step**, re-derive from `requires_dist` again rather
+  than guessing at another version — this pin set was checked pairwise this time (every explicitly
+  pinned package's full dependency list, not just its `jax` line), but a fresh conflict from a
+  package not yet touched is still possible.
+- **If the JAX device check fails on GPU** (build succeeds, runtime still can't see CUDA), the
+  CUDA-11 ceiling is now firmly established at 0.4.7 — there is no Tier 1.5 to try. Go straight to
+  the pre-planned Tier 2 fallback (§3 of `infrastructure-design.md`, Q3 = B): two images,
+  `colabdesign.sif` on a CUDA 12 base.
 - **On a full pass**: U1 is fully verified and done. That closes the last open item before
   **milestone M1** (a real design via hand-written `sbatch`).
 - **In parallel, not blocked by the above**: U2b Runner — Functional Design is complete and awaiting

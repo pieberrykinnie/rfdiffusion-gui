@@ -566,3 +566,32 @@ Verifying /home/vuqh1/rfd-images/rfdiffusion.sif
 **Context**: CONSTRUCTION - U1 Code Generation - the anticipated section 3 risk materialized on first real GPU allocation, root-caused via JAX's changelog and PyPI history rather than guesswork, fixed with a verified-compatible pin set, six artifacts updated, rebuild pending
 
 ---
+
+## Git - Commit and Push jaxlib 0.4.7 Re-Pin
+**Timestamp**: 2026-08-07T00:05:00Z (approx)
+**User Input**: "commit and push"
+**AI Response**: "Staged all six changed files, verified the file list, committed as fe4d6f4 with a message covering the root cause (JAX's CHANGELOG.md pinpointing jax 0.4.8 as where CUDA 11.8 became required), why jaxlib 0.4.7 is the correct ceiling not an arbitrary choice, and the chex downgrade this forced. Pushed to origin/main."
+**Context**: CONSTRUCTION - U1 Code Generation - jaxlib/chex re-pin committed and pushed
+
+---
+
+## U1 Verification - First Build Attempt With the Re-Pin Fails: Incomplete `optax` Check
+**Timestamp**: 2026-08-07T00:15:00Z (approx)
+**User Input**: "```
+Resolved 6 packages in 243ms
+[...]
++ uv pip install --python /app/RFdiffusion/.venv/bin/python --no-cache jax==0.4.7 jaxlib==0.4.7+cuda11.cudnn86 opt_einsum_fx py3Dmol joblib immutabledict chex==0.1.82 optax==0.2.2 dm-haiku==0.0.12 -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+Using Python 3.9.23 environment at: /app/RFdiffusion/.venv
+  x No solution found when resolving dependencies:
+  `-> Because optax==0.2.2 depends on chex>=0.1.86 and you require chex==0.1.82, we can conclude that your requirements and optax==0.2.2 are
+      incompatible.
+      And because you require optax==0.2.2, we can conclude that your requirements are unsatisfiable.
+FATAL:   While performing build: while running engine: exit status 1
+
+Build FAILED (exit 255).
+[...documented fallback chain printed by build-image.sh...]
+```"
+**AI Response**: "Recognised immediately that the previous round's audit of optax was incomplete: it checked only optax==0.2.2's jax lower bound (jax>=0.1.55, satisfied) and never re-checked its FULL requires_dist for a chex constraint, even though the whole point of that round's work was picking a chex downgrade. Fetched optax==0.2.2's complete PyPI metadata and confirmed it directly: chex>=0.1.86, an unconditional hard dependency, exactly matching the resolver's own error. STATED THE MISS PLAINLY rather than quietly fixing it, since this is exactly the kind of self-correction the project's audit trail exists to make visible. Re-investigated properly this time: fetched optax's full release history and, for each candidate version in the jax-0.4.7 era, its COMPLETE requires_dist (not just the jax line) - optax 0.1.4, 0.1.5, and 0.1.7 all declare only chex>=0.1.5, comfortably satisfied by chex==0.1.82. Picked optax==0.1.7 (2023-07-26) as the newest of these, nearly contemporaneous with chex 0.1.82 (2023-07-20). BEFORE FINALISING, went one step further than the minimum needed to fix this specific error, to avoid a THIRD build-cycle discovery: checked dm-haiku==0.0.12's full requires_dist for the first time (previous rounds checked only its optional [jax] extra) and found an unconditional flax>=0.7.1 dependency never previously examined. Fetched flax 0.7.1's requires_dist and confirmed jax>=0.4.2, compatible with jax==0.4.7 - no conflict, but this was luck-adjacent since it had never actually been checked; recorded explicitly that dm-haiku needs no change specifically because flax 0.7.1 happens to be compatible, not because dm-haiku itself declared no relevant constraint. Also verified the new set has no reverse conflicts: chex 0.1.82 has no optax back-reference, optax 0.1.7 has no flax back-reference, ruling out a hidden cycle. FIXED containers/rfdiffusion.def: optax==0.2.2 -> optax==0.1.7, with the def file's own comment rewritten to record the miss explicitly (why checking only the jax line per package was insufficient) rather than silently correcting the version number and erasing the lesson. UPDATED ALL SIX ARTIFACTS touched by the previous round to correct the same optax==0.2.2 claim everywhere it appeared, rather than leaving stale 'needed no change' text alongside the new correction: u1-code-generation-plan.md (Verified Pins section revised, new Step 12 documenting the build failure and full re-investigation), infrastructure-design.md (section 8.1g extended with the build failure and correction, a new generalisable lesson about checking full requires_dist not just the constraint under suspicion, section 3's materialized-notice pointer updated), u1-code-summary.md (Verification Results section extended with the build failure and fix, Next section's rebuild command and risk framing both updated to distinguish a resolution-time failure from a GPU-time failure), aidlc-state.md (new dated section for the build failure, Stage Progress and Current Status blocks both updated to reflect a fifth round rather than a fourth). Verified bash -n still clean on the corrected %post block. STATED PLAINLY WHAT IS NOT YET TRUE: image not yet rebuilt with this corrected set; if the build fails AGAIN at resolution, the guidance now explicitly says to re-check every pinned package's full dependency list rather than the single constraint that just failed, learning from being caught out twice by partial checks in this same investigation."
+**Context**: CONSTRUCTION - U1 Code Generation - build-time resolver conflict from an incomplete prior dependency check, root-caused and fixed with a fully cross-checked pin set, six artifacts corrected, rebuild pending
+
+---
