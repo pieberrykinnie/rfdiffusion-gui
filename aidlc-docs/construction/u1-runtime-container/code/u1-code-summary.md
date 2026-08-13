@@ -376,28 +376,35 @@ an unrelated second variable), `chex==0.1.82`, `optax==0.1.7`. `%labels` and the
 comments updated to match; the guard's comment now states plainly what it can and cannot catch — it
 asserts jaxlib *is* a CUDA build, never that the CUDA build is *new enough* for this runtime.
 
-**Not yet rebuilt or re-verified.**
+### Rebuild and GPU re-verification, 2026-08-07 — U1 fully verified
+
+Rebuilt with the corrected pin set — resolution succeeded, no further transitive conflicts.
+Re-verified on a real GPU allocation (`agpu` partition, NVIDIA A30, sm_80, CUDA 11.6 arch list):
+
+```
+=== 4. JAX imports and sees the GPU (known CUDA-11 risk)
+    jax 0.4.7
+    jaxlib 0.4.7+cuda11.cudnn86
+    devices [StreamExecutorGpuDevice(id=0, process_index=0, slice_index=0)]
+  [ OK ]   jaxlib is a CUDA build (pin survived dependency resolution)
+  [ OK ]   JAX imports and reports a GPU device
+...
+  PASS 13   FAIL 0
+```
+
+Every check passed, including both approach-invalidating ones: check 3 (sokrypton fork, `dump_pdb`
+present — FR-16/FR-17 achievable) and check 4 (JAX sees a real CUDA GPU device, not a CPU fallback).
+The only non-`OK` line is the pre-known `ananas` `WARN` (symmetry="auto" unavailable — documented
+upstream 404, unrelated to this defect chain). The §3 risk this project carried since infrastructure
+design is now **closed**: `jaxlib 0.4.7` resolves the CUDA-11 ceiling and has no other incompatibility
+with the fork or ColabDesign at the pinned commits.
+
+**U1 is fully verified and done.**
 
 ---
 
 ## Next
 
-- **User**: **rebuild the image** (`scripts/build-image.sh`) to pick up the corrected
-  `jax`/`jaxlib`/`chex`/`optax` set, then a short multi-partition GPU allocation to re-verify:
-  ```bash
-  salloc --partition=agpu,stamps-b,mcordgpu-b,gpu,livi-b --gpus=1 --cpus-per-task=2 --mem-per-cpu=4000M --time=0-00:15:00
-  ```
-  then `bash scripts/verify-image.sh`. Expect **PASS 12 / FAIL 0** if `jaxlib 0.4.7` resolves the
-  CUDA mismatch and ColabDesign has no other incompatibility at this older jax version.
-- **If the build still fails at the resolution step**, re-derive from `requires_dist` again rather
-  than guessing at another version — this pin set was checked pairwise this time (every explicitly
-  pinned package's full dependency list, not just its `jax` line), but a fresh conflict from a
-  package not yet touched is still possible.
-- **If the JAX device check fails on GPU** (build succeeds, runtime still can't see CUDA), the
-  CUDA-11 ceiling is now firmly established at 0.4.7 — there is no Tier 1.5 to try. Go straight to
-  the pre-planned Tier 2 fallback (§3 of `infrastructure-design.md`, Q3 = B): two images,
-  `colabdesign.sif` on a CUDA 12 base.
-- **On a full pass**: U1 is fully verified and done. That closes the last open item before
-  **milestone M1** (a real design via hand-written `sbatch`).
-- **In parallel, not blocked by the above**: U2b Runner — Functional Design is complete and awaiting
-  Code Generation.
+- **Milestone M1** — a real design via hand-written `sbatch` on a Grex GPU node — is now unblocked;
+  U1 was the last open item ahead of it.
+- **In parallel**: U2b Runner — Functional Design is complete and awaiting Code Generation.

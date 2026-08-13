@@ -237,7 +237,20 @@ x No solution found when resolving dependencies:
 - [x] `containers/rfdiffusion.def` — `optax==0.2.2` → `optax==0.1.7`. Comment rewritten to record
       the miss explicitly (why `jax`-only checking wasn't enough) rather than silently correcting it.
 
-**Not yet rebuilt or re-verified** — pending the user's next `build-image.sh` attempt.
+### Step 13: Rebuild and GPU re-verification — U1 fully verified (added 2026-08-07)
+
+- [x] Rebuilt with the corrected pin set (`jax==0.4.7`, `jaxlib==0.4.7+cuda11.cudnn86`,
+      `chex==0.1.82`, `optax==0.1.7`, `dm-haiku==0.0.12`) — resolution succeeded, no further
+      transitive conflicts.
+- [x] Re-verified on a real GPU allocation (`agpu` partition, NVIDIA A30, sm_80) —
+      **PASS 13 / FAIL 0**. Every check passes, including the two that could have invalidated the
+      approach: check 3 (sokrypton fork, `dump_pdb` present — FR-16/FR-17 achievable) and check 4
+      (JAX imports and reports a real GPU device — `jax 0.4.7` / `jaxlib 0.4.7+cuda11.cudnn86` /
+      `StreamExecutorGpuDevice`). The §3 risk is now closed: the CUDA-11 ceiling fix works.
+- [x] Only non-`OK` line is the pre-known `ananas` `WARN` (symmetry="auto" unavailable — documented,
+      non-fatal, from the upstream `files.ipd.uw.edu` 404, unrelated to this defect chain).
+
+**U1 is fully verified. No further action needed on this unit.**
 
 ---
 

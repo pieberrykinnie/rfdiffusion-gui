@@ -451,15 +451,12 @@ Workflow Planning and favours skipping optional stages.
         `chex>=0.1.86`, conflicting with `chex==0.1.82`. Caught immediately by `uv`, before staging —
         the "one resolution pass" design working as intended. Re-pinned `optax==0.1.7`; also checked
         `dm-haiku`'s unconditional `flax>=0.7.1` dependency this time (missed in the first pass) and
-        confirmed it's compatible. Image not yet rebuilt with this corrected set.
-      - [ ] **Remaining**: rebuild the image with `jax==0.4.7` / `jaxlib==0.4.7+cuda11.cudnn86` /
-        `chex==0.1.82` / `optax==0.1.7`, then the same short multi-partition GPU allocation to
-        re-verify —
-        `salloc --partition=agpu,stamps-b,mcordgpu-b,gpu,livi-b --gpus=1 --cpus-per-task=2 --mem-per-cpu=4000M --time=0-00:15:00`
-        then `bash scripts/verify-image.sh`. Expect PASS 12/FAIL 0. **If the build fails again at
-        resolution**, check every pinned package's full `requires_dist`, not just the constraint
-        under suspicion. **If it builds but the device check still fails on GPU, the CUDA-11 ceiling
-        is exhausted** — go straight to Tier 2 (§3: two images, Q3=B).
+        confirmed it's compatible.
+      - **Rebuilt and re-verified on GPU, 2026-08-07** ✅ — **PASS 13 / FAIL 0** on a real GPU
+        allocation (NVIDIA A30, `agpu` partition, sm_80). Both approach-invalidating checks passed:
+        check 3 (fork, `dump_pdb` present) and check 4 (JAX reports `StreamExecutorGpuDevice`, a
+        real CUDA GPU, not a CPU fallback). Only non-`OK` line is the pre-known, non-fatal `ananas`
+        warning. **U1 verification is complete — the §3 risk is closed.**
 - [x] U2a Core Domain: Functional Design **DONE** → Code Generation **DONE** 2026-08-01
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
       - 157 tests, 100% coverage, verified on real Python 3.9.25 locally
@@ -473,22 +470,20 @@ Workflow Planning and favours skipping optional stages.
 - [ ] Build and Test - **EXECUTE**
 
 ## Current Status
-*(Corrected 2026-08-06 — this block had gone stale at Units Generation while CONSTRUCTION advanced.)*
+*(Corrected 2026-08-07 — U1 verification is now complete; see below.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: U1 verification — CPU surface fully clean; §3 JAX/CUDA-11 risk materialized on
-  first GPU allocation; first re-pin attempt (`jaxlib 0.4.7`) hit a second, transitive conflict
-  (`optax`/`chex`) caught at build time; corrected set (`jax==0.4.7`, `jaxlib==0.4.7+cuda11.cudnn86`,
-  `chex==0.1.82`, `optax==0.1.7`) not yet rebuilt. U2b Runner Functional Design awaiting approval
-- **Completed**: U1 Code Generation (+ 2026-08-06 verification corrections, five rounds — three CPU,
-  one GPU, one build-time resolver failure), U2a Core Domain (157 tests, 100% coverage, real
-  Python 3.9.25)
-- **Next Stage**: U2b Runner — Code Generation (not blocked by U1's remaining GPU re-verification)
-- **Status**: U1 nearly verified — **FR-16/FR-17 confirmed achievable**; CPU surface fully clean; the
-  §3 risk this project has carried since infrastructure design **has now actually happened**
-  (`jaxlib 0.4.25` needs CUDA ≥ 11.8, base is 11.6.2); the first fix attempt was itself incomplete
-  (`optax==0.2.2` requires `chex>=0.1.86`, conflicting with the `chex==0.1.82` downgrade) but was
-  caught by `uv`'s resolver before any cluster time was spent; corrected pin set awaits a rebuild and
-  one more short GPU allocation to confirm. Not blocking U2b.
+- **Current Stage**: **U1 fully verified** (PASS 13 / FAIL 0 on real GPU hardware). U2b Runner
+  Functional Design awaiting approval — this is now the active stage
+- **Completed**: U1 Code Generation and verification (2026-08-06/07 corrections, six rounds — three
+  CPU, one GPU risk-materialization, one build-time resolver failure, one final GPU confirmation),
+  U2a Core Domain (157 tests, 100% coverage, real Python 3.9.25)
+- **Next Stage**: U2b Runner — Code Generation
+- **Status**: **U1 is done.** FR-16/FR-17 confirmed achievable (sokrypton fork on PYTHONPATH,
+  `dump_pdb` present); the §3 risk this project carried since infrastructure design (`jaxlib 0.4.25`
+  needing CUDA ≥ 11.8 against an 11.6.2 base) materialized, was root-caused via JAX's changelog, and
+  is now closed — `jax==0.4.7` / `jaxlib==0.4.7+cuda11.cudnn86` / `chex==0.1.82` / `optax==0.1.7`
+  verified on a real NVIDIA A30. Tier 2 (§3, two images) was never needed. **Milestone M1 is
+  unblocked.**
 - **Next milestone**: **M1** — a real design via hand-written `sbatch` on a Grex GPU node
 
 ### OPERATIONS PHASE

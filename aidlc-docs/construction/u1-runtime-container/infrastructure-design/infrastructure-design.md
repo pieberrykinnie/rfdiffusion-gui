@@ -170,18 +170,18 @@ turn; `PipelineOrchestrator` already separates the stages, so only the invocatio
 
 **Degradation path (last resort)**: JAX on CPU. Correct but slow; documented, not recommended.
 
-**⚠️ MATERIALIZED 2026-08-06 — Tier 1 fallback now active.** The risk described above turned out to
-be slightly different in shape from what was anticipated: it was not ColabDesign requiring a newer
-JAX, but **JAX itself requiring a newer CUDA than this base image ships**. `jaxlib==0.4.25` failed on
-a real GPU with `Found CUDA version 11060, but JAX was built against version 11080, which is newer`.
+**⚠️ MATERIALIZED 2026-08-06, ✅ RESOLVED 2026-08-07.** The risk described above turned out to be
+slightly different in shape from what was anticipated: it was not ColabDesign requiring a newer JAX,
+but **JAX itself requiring a newer CUDA than this base image ships**. `jaxlib==0.4.25` failed on a
+real GPU with `Found CUDA version 11060, but JAX was built against version 11080, which is newer`.
 Root-caused to `jax 0.4.8` (2023-03-29 `CHANGELOG.md`: "CUDA 11.4 support has been dropped... only
 support CUDA 11.8 and CUDA 12") — every cuda11 jaxlib from 0.4.8 onward needs CUDA ≥ 11.8; this base
-is 11.6.2. `jaxlib 0.4.7` is the newest build that predates the bump, paired with `chex==0.1.82`
-(the newest chex release still accepting `jax>=0.4.6` rather than the `>=0.4.16` that `0.1.86`
-requires) and, after a first attempt missed a transitive conflict caught by the real build,
-`optax==0.1.7`. Full derivation, including the missed conflict, in §8.1g. **Tier 2 (two images,
-Q3=B) remains the fallback if this pin set turns out to have some other incompatibility with
-ColabDesign at the pinned commit** — not yet needed.
+is 11.6.2. Re-pinned to `jaxlib 0.4.7` (the newest build predating the bump), `chex==0.1.82` (the
+newest chex release still accepting `jax>=0.4.6` rather than the `>=0.4.16` that `0.1.86` requires)
+and, after a first attempt missed a transitive conflict caught by the real build, `optax==0.1.7`.
+Full derivation, including the missed conflict, in §8.1g. **Rebuilt and re-verified on a real GPU
+(NVIDIA A30, `agpu` partition) 2026-08-07: PASS 13 / FAIL 0**, including both approach-invalidating
+checks. **The risk is closed — Tier 2 (two images, Q3=B) was never needed.**
 
 ---
 
@@ -633,11 +633,20 @@ comment now states explicitly what it does **not** catch: it asserts jaxlib *is*
 that the CUDA build is *new enough* for the runtime — that distinction is exactly what the original
 CUDA-version defect was, and only a real GPU execution (verify-image.sh checks 1/2/4) can catch it.
 
-**Not yet rebuilt or re-verified** — pending the user's next `build-image.sh` →`verify-image.sh`
-cycle. If the full set still fails at the resolution step, re-derive from `requires_dist` again
-rather than guessing; if it resolves and builds but `jaxlib 0.4.7` surfaces some GPU-time
-incompatibility with ColabDesign at the pinned commit, Tier 2 (§3 — two images, Q3=B) is the next and
-last fallback — the CUDA-11-only ceiling established here is unconditional, so there is no Tier 1.5.
+**Rebuilt and re-verified on GPU, 2026-08-07 — PASS 13 / FAIL 0.** Resolution succeeded with no
+further transitive conflicts. Real GPU allocation (`agpu`, NVIDIA A30, sm_80) confirmed:
+
+```
+    jax 0.4.7
+    jaxlib 0.4.7+cuda11.cudnn86
+    devices [StreamExecutorGpuDevice(id=0, process_index=0, slice_index=0)]
+  [ OK ]   jaxlib is a CUDA build (pin survived dependency resolution)
+  [ OK ]   JAX imports and reports a GPU device
+```
+
+Both approach-invalidating checks (§9: check 3 the fork, check 4 JAX/GPU) passed. **The §3 risk is
+now closed** — `jaxlib 0.4.7` resolves the CUDA-11 ceiling with no further incompatibility at the
+pinned commits. Tier 2 (two images, Q3=B) was never needed.
 
 **Generalisable lesson, on top of §8.1g's own**: checking only the constraint you are actively
 worried about (here, each package's `jax` bound) is not the same as checking the package's full
@@ -695,8 +704,15 @@ designed.
 **Status 2026-08-06, first GPU round**: the device test **correctly failed** — not a script defect
 this time, but the real §3 risk finally materializing (§8.1g): `jaxlib 0.4.25` requires CUDA ≥ 11.8,
 this base ships 11.6.2. Fixed by re-pinning to `jaxlib 0.4.7` (the newest cuda11 build predating
-that requirement) plus `chex 0.1.82` (the version bump this forced). **Not yet re-verified on GPU**
-— this is now the only remaining U1 verification step.
+that requirement) plus `chex 0.1.82` and, after a first attempt missed a transitive `chex` conflict
+caught by the real build, `optax 0.1.7`.
+
+**Status 2026-08-07, rebuild and second GPU round — U1 COMPLETE**: rebuilt with the corrected pin
+set, no further resolution conflicts. Re-verified on a real GPU (NVIDIA A30, `agpu` partition):
+**PASS 13 / FAIL 0**. All seven checks passed, including both that could have invalidated the
+approach — step 5 (fork present) and step 6 (JAX reports a real CUDA GPU device, not a CPU
+fallback). The only non-`OK` line is the pre-known, non-fatal `ananas` warning. **U1's definition of
+done is fully satisfied.**
 
 **Three preconditions this section did not originally state, all discovered by running it**:
 `/scratch/schedules` must exist before *anything* imports the fork (§8.1d); any check asserting a

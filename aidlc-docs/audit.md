@@ -595,3 +595,44 @@ Build FAILED (exit 255).
 **Context**: CONSTRUCTION - U1 Code Generation - build-time resolver conflict from an incomplete prior dependency check, root-caused and fixed with a fully cross-checked pin set, six artifacts corrected, rebuild pending
 
 ---
+
+## Git - Commit and Push optax 0.1.7 Correction
+**Timestamp**: 2026-08-07T00:30:00Z (approx)
+**User Input**: "commit and push"
+**AI Response**: "Staged all six changed files (aidlc-state.md, audit.md, u1-code-generation-plan.md, u1-code-summary.md, infrastructure-design.md, containers/rfdiffusion.def), committed as b15df27 with a message covering the build-time failure, root cause (optax's full requires_dist declaring chex>=0.1.86, not just its jax bound), the corrected pin set, and the dm-haiku/flax cross-check performed this round. Pushed to origin/main (fe4d6f4..b15df27)."
+**Context**: CONSTRUCTION - U1 Code Generation - optax 0.1.7 correction committed and pushed, rebuild still pending
+
+---
+
+## U1 Verification - Rebuild and Final GPU Re-Verification: PASS 13 / FAIL 0
+**Timestamp**: 2026-08-07T01:00:00Z (approx)
+**User Input**: "```
+=== 1. GPU visible inside the container
+    name, memory.total [MiB], compute_cap
+    NVIDIA A30, 24576 MiB, 8.0
+  [ OK ]   GPU visible via --nv
+[...]
+=== 4. JAX imports and sees the GPU (known CUDA-11 risk)
+    jax 0.4.7
+    jaxlib 0.4.7+cuda11.cudnn86
+    devices [StreamExecutorGpuDevice(id=0, process_index=0, slice_index=0)]
+  [ OK ]   jaxlib is a CUDA build (pin survived dependency resolution)
+  [ OK ]   JAX imports and reports a GPU device
+[...]
+=== Summary
+  PASS 13   FAIL 0
+
+  Image verified. U1 is done; milestone M1 is next (a real design via hand-written sbatch).
+```"
+**AI Response**: "Confirmed this is the terminal result for U1: the rebuild with the corrected jax==0.4.7 / jaxlib==0.4.7+cuda11.cudnn86 / chex==0.1.82 / optax==0.1.7 / dm-haiku==0.0.12 set resolved cleanly (no repeat of the prior round's resolver conflict) and the resulting image passed every one of the 13 checks on a real GPU allocation (NVIDIA A30, agpu partition, sm_80), including both checks that could have invalidated the whole U1 approach: check 3/step 5 (sokrypton fork on PYTHONPATH, dump_pdb keys present, confirming FR-16/FR-17 are achievable) and check 4/step 6 (JAX reports a real StreamExecutorGpuDevice, not a CPU fallback, confirming the CUDA-11 ceiling fix actually works on hardware, not just at dependency-resolution time). The only non-OK line is the pre-known, already-documented ananas WARN (symmetry=auto unavailable, unrelated to this defect chain, non-fatal). Declared the section 3 risk that this project has carried since infrastructure design CLOSED - jaxlib 0.4.7 has no other incompatibility with the fork or ColabDesign at the pinned commits, so Tier 2 (two images on a CUDA 12 base) was never needed. Updated all four remaining artifacts to record the final result rather than leaving them at 'not yet rebuilt': u1-code-generation-plan.md (new Step 13 closing out the plan with the PASS 13/FAIL 0 result), u1-code-summary.md (replaced the 'Not yet rebuilt' Next section with the actual rebuild/re-verify results and a shortened Next section pointing at milestone M1 and U2b), infrastructure-design.md (section 8.1g's 'Not yet rebuilt' paragraph replaced with the verified result, section 3's MATERIALIZED notice upgraded to MATERIALIZED/RESOLVED, section 9's verification status given a new dated 'U1 COMPLETE' entry), aidlc-state.md (U1's GPU-allocation bullet replaced with the final pass result, the U1 checkbox item's remaining work removed since there is none left, Current Status block rewritten to state plainly that U1 is done and milestone M1 is unblocked). This closes the last open item ahead of milestone M1 (a real design via hand-written sbatch on a Grex GPU node)."
+**Context**: CONSTRUCTION - U1 Code Generation and Verification - final GPU re-verification after the optax fix, PASS 13/FAIL 0, U1 fully complete, four artifacts updated to close it out, milestone M1 unblocked
+
+---
+
+## U1 Code Generation Stage - Approval and Commit to main
+**Timestamp**: 2026-08-07T01:15:00Z (approx)
+**User Input**: "I want to put main in a \"done with this unit of work\" stage so I can continue working in other worktrees. commit and push when done"
+**AI Response**: "Interpreted as approval of the standardized Code Generation completion message just presented (Continue to Next Stage), scoped specifically to landing U1's finished, fully-verified state on main so it is a clean base for other worktrees - not a request to also start U2b's Code Generation in this session. Logged this approval, then staged and committed the five documentation files updated after the final GPU verification (aidlc-state.md, audit.md, u1-code-generation-plan.md, u1-code-summary.md, infrastructure-design.md) and pushed to origin/main."
+**Context**: CONSTRUCTION - U1 Code Generation - stage approved complete, main updated to a clean done-with-U1 state for parallel worktree use
+
+---
