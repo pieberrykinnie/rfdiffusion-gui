@@ -70,12 +70,58 @@ SE3Transformer's *own* `requirements.txt`, but that file is decorative — `setu
 touches — it imports only `se3_transformer.model`).
 
 **Fixed in `containers/rfdiffusion.def`**: `uv pip install icecream pyrsistent` added after the
-`dump_pdb` assertion. **Not yet rebuilt** — this changes image content, so it needs a real
-`build-image.sh` run, unlike the prior round's script-only fixes.
+`dump_pdb` assertion.
+
+## ✅ U1 Verification — Third Real Execution (2026-08-06, same node) — CPU surface fully clean
+
+Rebuilt and re-verified. **PASS 9 / FAIL 3.** Check 6 now passes in full — Defect 3 confirmed fixed,
+no further hidden import gap surfaced. The 3 FAILs are exactly the predicted set: checks 1, 2, and
+the JAX device test, all genuinely GPU-gated.
+
+**Three rounds, three real defects found and fixed** (two in `verify-image.sh`, one in the image
+itself), each confirmed by the *next* real execution rather than assumed fixed on inspection alone.
+**U1's entire CPU-verifiable surface is now clean.** Only a short GPU allocation for checks 1, 2, and
+the JAX device test remains — see Stage Progress below for the exact command. The §3 JAX/CUDA-11
+risk is the one open question a full U1 pass still has to answer.
 
 **Confirmed no further script change needed**: both packages sit on one eager top-level import chain
 (`run_inference.py` → `inference.utils` → `inference.model_runners` → `inference.symmetry` →
 `pyrsistent`), so the existing check 6 exercises both without modification.
+
+## ⚠️ U1 Verification — First GPU Execution (2026-08-06, same node) — §3 risk materialized
+
+The one thing three CPU rounds structurally could not test: the JAX device check, on a real GPU. It
+**failed**, and correctly so — this is the §3 risk finally happening, not a fourth script or image
+defect:
+
+```
+CUDA backend failed to initialize: Found CUDA version 11060, but JAX was built against
+version 11080, which is newer.
+```
+
+**Inverted from how §3 originally framed it.** The risk was written as "ColabDesign may need newer
+JAX than CUDA 11.6 permits." What actually happened: **JAX itself needs newer CUDA than this base
+has.** `jaxlib 0.4.25` — confirmed intact through every CPU round — was built against CUDA 11.8; the
+base runs CUDA 11.6.2. CUDA's compatibility model runs one direction only (newer runtime tolerates
+older-build code, never the reverse), so this was never going to work once actually run on a GPU.
+
+**Root-caused from JAX's own `CHANGELOG.md`**: `jax 0.4.8` (2023-03-29) is the exact release that
+"dropped CUDA 11.4 support... JAX GPU wheels only support CUDA 11.8 and CUDA 12." Every cuda11
+jaxlib from 0.4.8 on requires CUDA ≥ 11.8. `jaxlib 0.4.7` is the newest build that predates this —
+confirmed against the full wheel index, and it is the *ceiling*, not an arbitrary older choice: there
+is no cuda11 jaxlib release between 0.4.7 and 0.4.8 to try instead.
+
+**A second, cascading problem found before touching the cluster again**: `chex==0.1.86` requires
+`jax>=0.4.16`, incompatible with `jax==0.4.7`. Traced chex's PyPI history to find the newest release
+that still accepts `jax>=0.4.6`: **`chex==0.1.82`**. `optax==0.2.2` and `dm-haiku==0.0.12` needed no
+change (verified each package's real `requires_dist`, not assumed).
+
+**Fixed in `containers/rfdiffusion.def`**: `jax==0.4.7`, `jaxlib==0.4.7+cuda11.cudnn86` (cuDNN 8.6
+kept — that's a separate, already-working fix, untouched), `chex==0.1.82`. **Not yet rebuilt or
+re-verified on GPU.**
+
+**If this still fails**: the CUDA-11 ceiling is now firmly established — no more cuda11 options
+exist to try. Next step is Tier 2 of §3: two images, `colabdesign.sif` on a CUDA 12 base.
 
 ## U2b Runner — Verified Facts (from source research, not assumption)
 1. **Hydra `config_path` resolves relative to the script file**, not cwd — `InferenceExecutor` needs
@@ -372,11 +418,20 @@ Workflow Planning and favours skipping optional stages.
         approach-invalidating one) PASSED; jaxlib CUDA pin intact; two defects found in
         `verify-image.sh` and fixed
       - **Re-verified same node, second execution** — both script fixes confirmed; found and fixed
-        **Defect 3, in the image itself**: `icecream` and `pyrsistent` missing (see §8.1f). Image
-        rebuild is pending
-      - [ ] **Remaining**: rebuild the image, re-run on CPU to confirm Defect 3's fix, then checks 1,
-        2 and the corrected JAX device test on a short GPU allocation. **The §3 JAX/CUDA-11 risk is
-        still open.**
+        **Defect 3, in the image itself**: `icecream` and `pyrsistent` missing (see §8.1f)
+      - **Rebuilt and re-verified same node, third execution** ✅ — **PASS 9 / FAIL 3**, check 6 now
+        fully passing. U1's entire CPU-verifiable surface is clean; the 3 FAILs are exactly the
+        predicted GPU-gated set (checks 1, 2, JAX device test)
+      - **First real GPU allocation, 2026-08-06** ⚠️ — the §3 risk **materialized**: `jaxlib 0.4.25`
+        requires CUDA ≥ 11.8, this base runs CUDA 11.6.2. Re-pinned to `jaxlib 0.4.7` (the newest
+        cuda11 build below that requirement) + `chex 0.1.82` (forced by the downgrade). Image not
+        yet rebuilt with this fix.
+      - [ ] **Remaining**: rebuild the image, then the same short multi-partition GPU allocation to
+        re-verify —
+        `salloc --partition=agpu,stamps-b,mcordgpu-b,gpu,livi-b --gpus=1 --cpus-per-task=2 --mem-per-cpu=4000M --time=0-00:15:00`
+        then `bash scripts/verify-image.sh`. Expect PASS 12/FAIL 0. **If it still fails, the CUDA-11
+        ceiling is exhausted** — go straight to Tier 2 (§3: two images, Q3=B), there is no further
+        cuda11 version to try.
 - [x] U2a Core Domain: Functional Design **DONE** → Code Generation **DONE** 2026-08-01
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
       - 157 tests, 100% coverage, verified on real Python 3.9.25 locally
@@ -392,14 +447,16 @@ Workflow Planning and favours skipping optional stages.
 ## Current Status
 *(Corrected 2026-08-06 — this block had gone stale at Units Generation while CONSTRUCTION advanced.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: U1 verification in progress on Grex, image rebuild pending (Defect 3); U2b
+- **Current Stage**: U1 verification — CPU surface fully clean; first GPU allocation exercised the
+  §3 JAX/CUDA-11 risk and it materialized (`jaxlib 0.4.7` re-pin applied, rebuild pending). U2b
   Runner Functional Design awaiting approval
-- **Completed**: U1 Code Generation (+ 2026-08-06 verification corrections, two rounds), U2a Core
-  Domain (157 tests, 100% coverage, real Python 3.9.25)
-- **Next Stage**: U2b Runner — Code Generation (not blocked by U1's remaining GPU checks)
-- **Status**: U1 partially verified — **FR-16/FR-17 confirmed achievable**; image needs a rebuild for
-  Defect 3 (`icecream`/`pyrsistent`) before check 6 can pass; GPU-gated checks still pending
-  a short allocation. Not blocking U2b.
+- **Completed**: U1 Code Generation (+ 2026-08-06 verification corrections, four rounds — three CPU,
+  one GPU), U2a Core Domain (157 tests, 100% coverage, real Python 3.9.25)
+- **Next Stage**: U2b Runner — Code Generation (not blocked by U1's remaining GPU re-verification)
+- **Status**: U1 nearly verified — **FR-16/FR-17 confirmed achievable**; CPU surface fully clean; the
+  §3 risk this project has carried since infrastructure design **has now actually happened**
+  (`jaxlib 0.4.25` needs CUDA ≥ 11.8, base is 11.6.2) and has a verified fix (`jaxlib 0.4.7` +
+  `chex 0.1.82`) awaiting a rebuild and one more short GPU allocation to confirm. Not blocking U2b.
 - **Next milestone**: **M1** — a real design via hand-written `sbatch` on a Grex GPU node
 
 ### OPERATIONS PHASE

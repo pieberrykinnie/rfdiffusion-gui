@@ -43,7 +43,7 @@ From: rosettacommons/rfdiffusion
     Torch        1.12.1+cu116
     RFdiffusion  sokrypton/RFdiffusion@597d37f2a686e23941440fddf6daa4cb778e7bc7
     ColabDesign  sokrypton/ColabDesign@e31a56fe1d9b4de25c8697f3a28b75892941cc72
-    JaxLib       0.4.25+cuda11.cudnn86 (CUDA build enforced by a build-time guard)
+    JaxLib       0.4.7+cuda11.cudnn86 (CUDA build enforced by a build-time guard; §3 fallback tier 1 -- 0.4.25 required CUDA 11.8, this base is 11.6)
     GPUSupport   sm_70 (V100), sm_80 (A30) -- NOT sm_89 (L40s)
 
 %post
@@ -143,39 +143,54 @@ From: rosettacommons/rfdiffusion
     # -----------------------------------------------------------------------
     # JAX for ColabDesign (ProteinMPNN + AlphaFold).
     #
-    # jaxlib 0.4.25+cuda11.cudnn86 is the NEWEST CUDA 11 build with cp39
-    # wheels (enumerated from jax_cuda_releases.html). It needs cuDNN >= 8.6,
-    # but the base image carries the cuDNN 8.4 era runtime -- so we install
-    # cuDNN as a pip package. That makes JAX independent of whatever cuDNN the
-    # base image happens to ship, removing the most likely failure cause up
-    # front rather than discovering it at runtime.
+    # §3 FALLBACK TIER 1 IS NOW ACTIVE (as of 2026-08-06 -- see
+    # infrastructure-design.md §8.1g). The originally-attempted
+    # jaxlib==0.4.25+cuda11.cudnn86 FAILED on a real GPU allocation:
+    #   "Found CUDA version 11060, but JAX was built against version 11080,
+    #   which is newer. The copy of CUDA that is installed must be at least
+    #   as new as the version against which JAX was built."
+    # i.e. CUDA's forward-compat model requires runtime >= build version, and
+    # this base image's runtime is CUDA 11.6.2 -- older than 11.8.
     #
-    # If this still fails, the documented fallback ladder is:
-    #   1. jaxlib==0.4.7+cuda11.cudnn82  (matches base cuDNN; much older)
-    #   2. two images (Q3=B): colabdesign.sif on a CUDA 12 base
-    # See infrastructure-design.md section 3.
+    # Root-caused via JAX's own CHANGELOG.md rather than guessed: "## jax
+    # 0.4.8 (March 29, 2023)" is the exact release where "CUDA 11.4 support
+    # has been dropped. JAX GPU wheels only support CUDA 11.8 and CUDA 12."
+    # Every cuda11-tagged jaxlib from 0.4.8 onward -- including 0.4.25 -- is
+    # therefore built against CUDA 11.8 regardless of what its cudnnXX suffix
+    # says. jaxlib 0.4.7 is the NEWEST cuda11 build that predates this bump,
+    # confirmed against the full wheel index at jax_cuda_releases.html.
+    #
+    # jaxlib still needs cuDNN >= 8.6, which the base image's 8.4-era runtime
+    # does not provide -- hence the pip-supplied cuDNN below, unchanged from
+    # the original attempt and unrelated to the CUDA-version problem above.
     # -----------------------------------------------------------------------
     uv pip install --python "$VPY" --no-cache "nvidia-cudnn-cu11==8.6.0.163"
 
     # ONE resolution pass for jax AND everything that depends on it.
     #
     # Installing the extras separately does not work: chex/optax/dm-haiku pull
-    # a newer jax, and uv then REPLACES jaxlib 0.4.25+cuda11.cudnn86 with the
-    # generic jaxlib 0.4.30 -- a CPU-only wheel. The build still "succeeds" and
-    # silently produces an image where JAX has no GPU. Resolving everything
-    # together forces any incompatibility to surface as a loud conflict here
-    # instead.
+    # a newer jax, and uv then REPLACES a pinned jaxlib with a generic CPU-only
+    # wheel. The build still "succeeds" and silently produces an image where
+    # JAX has no GPU. Resolving everything together forces any incompatibility
+    # to surface as a loud conflict here instead.
     #
-    # Extras pinned to versions verified (via PyPI requires-dist) to accept
-    # jax 0.4.25 on Python 3.9: chex 0.1.86 needs jax>=0.4.16; optax 0.2.2
-    # declares no jax bound; dm-haiku 0.0.12 constrains jax only under its
-    # optional [jax] extra.
+    # Extras re-verified (via PyPI requires-dist history, not assumption) for
+    # jax==0.4.7 specifically -- the versions pinned for jax 0.4.25 do NOT
+    # carry over unchanged:
+    #   chex   -- 0.1.86 needs jax>=0.4.16, which 0.4.7 VIOLATES. chex bumped
+    #             that floor to 0.4.16 in 0.1.83 (2023-09-20); 0.1.82
+    #             (2023-07-20) is the newest release still requiring only
+    #             jax>=0.4.6, so it is pinned here instead.
+    #   optax  -- 0.2.2 declares only jax>=0.1.55; no change needed.
+    #   dm-haiku -- 0.0.12's jax constraint lives entirely under its optional
+    #             [jax] extra, which this install does not request; no change
+    #             needed.
     uv pip install --python "$VPY" --no-cache \
-        "jax==0.4.25" \
-        "jaxlib==0.4.25+cuda11.cudnn86" \
+        "jax==0.4.7" \
+        "jaxlib==0.4.7+cuda11.cudnn86" \
         "opt_einsum_fx" \
         "py3Dmol" "joblib" "immutabledict" \
-        "chex==0.1.86" "optax==0.2.2" "dm-haiku==0.0.12" \
+        "chex==0.1.82" "optax==0.2.2" "dm-haiku==0.0.12" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
     # ColabDesign last, with --no-deps, so it cannot perturb the set above.
@@ -189,9 +204,15 @@ From: rosettacommons/rfdiffusion
     # HARD GUARD: fail the BUILD if jaxlib is not the CUDA build.
     #
     # This is the assertion that would have caught the clobbering above. A
-    # CUDA jaxlib reports a local version like "0.4.25+cuda11.cudnn86"; the
-    # CPU wheel reports a bare "0.4.30". Without this check the image builds
-    # fine and the problem only appears later as "JAX sees no GPU".
+    # CUDA jaxlib reports a local version like "0.4.7+cuda11.cudnn86"; a
+    # CPU wheel reports a bare version with no "+cuda..." suffix at all.
+    # Without this check the image builds fine and the problem only appears
+    # later as "JAX sees no GPU". NOTE: this guard checks for a CUDA BUILD,
+    # not a working one -- it would not have caught the CUDA-11.6-vs-11.8
+    # runtime mismatch below, since that jaxlib genuinely was a CUDA build,
+    # just one requiring a newer CUDA than this base image provides. That
+    # failure mode can only be caught by an actual GPU run (verify-image.sh
+    # checks 1/2/4, which is why they exist).
     # -----------------------------------------------------------------------
     "$VPY" - <<'GUARD'
 from importlib.metadata import version

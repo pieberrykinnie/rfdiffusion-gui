@@ -37,18 +37,39 @@ G-15, G-16, G-17, G-18, G-19, G-20; contributes to FR-13, G-1, G-11, G-12.
 | torch / DGL / e3nn / hydra | `1.12.1+cu116` / `1.0.2+cu116` / `0.3.3` / `1.3.2` | base Dockerfile |
 | `sokrypton/RFdiffusion` | **`597d37f2a686e23941440fddf6daa4cb778e7bc7`** | GitHub API, 2025-10-23 |
 | `sokrypton/ColabDesign` | **`e31a56fe1d9b4de25c8697f3a28b75892941cc72`** | GitHub API, 2025-10-23 |
-| jaxlib (CUDA 11) | **`0.4.25+cuda11.cudnn86`** — newest cuda11 build with cp39 wheels | enumerated `jax_cuda_releases.html` |
+| jaxlib (CUDA 11) | ~~`0.4.25+cuda11.cudnn86`~~ → **`0.4.7+cuda11.cudnn86`** (superseded 2026-08-06, see below) | enumerated `jax_cuda_releases.html` + JAX `CHANGELOG.md` |
 | cuDNN supply | `nvidia-cudnn-cu11==8.6.0.163` | PyPI |
 
 **Why `nvidia-cudnn-cu11` is pinned in**: jaxlib `cuda11.cudnn86` needs cuDNN ≥ 8.6, but the base
 image ships the cuDNN 8.4-era runtime. Installing cuDNN as a pip package makes JAX independent of
 whatever the base image carries — this removes the most likely cause of the §3 risk rather than
-waiting to hit it.
+waiting to hit it. **Unaffected by the jaxlib downgrade below** — still cuDNN 8.6, still pip-supplied.
 
-**Fallback ladder if JAX still fails** (verified to exist, no re-decision needed):
-1. `jaxlib==0.4.7+cuda11.cudnn82` — matches the base image's cuDNN directly; much older, so
-   ColabDesign may not support it
-2. Two images (Q3 = B) — `colabdesign.sif` on a CUDA 12 base
+**§3 fallback tier 1 is now ACTIVE (2026-08-06)**, triggered by a real GPU allocation on Grex:
+`jaxlib==0.4.25+cuda11.cudnn86` failed with `CUDA backend failed to initialize: Found CUDA version
+11060, but JAX was built against version 11080, which is newer.` CUDA's forward-compat model requires
+the installed runtime to be *at least as new* as the version jaxlib was built against, and this base
+image's runtime is 11.6.2 — older than 11.8.
+
+**Root-caused from JAX's own `CHANGELOG.md`, not guessed**: `jax 0.4.8` (2023-03-29) is the exact
+release where "CUDA 11.4 support has been dropped. JAX GPU wheels only support CUDA 11.8 and CUDA
+12." Every cuda11-tagged jaxlib from 0.4.8 onward — including 0.4.25 — is built against CUDA 11.8
+regardless of its `cudnnXX` suffix. **`jaxlib 0.4.7` is the newest cuda11 build that predates this
+bump**, confirmed against the full wheel index — this is the correct pin, not an arbitrary older one.
+
+**Downgrading jax alone is not sufficient** — `chex==0.1.86` (pinned for jax 0.4.25) requires
+`jax>=0.4.16`, which 0.4.7 violates. Checked chex's PyPI release history for exactly where that floor
+was introduced: bumped to `jax>=0.4.16` in `chex 0.1.83` (2023-09-20); **`chex 0.1.82`**
+(2023-07-20) is the newest release still requiring only `jax>=0.4.6`. `optax==0.2.2` (`jax>=0.1.55`)
+and `dm-haiku==0.0.12` (jax constraint lives only under an unrequested `[jax]` extra) need no change.
+
+**Verified pin set for jax 0.4.7**: `jax==0.4.7`, `jaxlib==0.4.7+cuda11.cudnn86`, `chex==0.1.82`,
+`optax==0.2.2`, `dm-haiku==0.0.12` — applied in `containers/rfdiffusion.def`.
+
+**Remaining fallback if this still fails**: two images (Q3 = B) — `colabdesign.sif` on a CUDA 12
+base. The CUDA-11-only ceiling is now firmly established (0.4.7 is the newest option, full stop), so
+this is the only tier left if 0.4.7 has some other incompatibility with ColabDesign at the pinned
+commit.
 
 ---
 
@@ -149,8 +170,38 @@ via check 6's now-preserved stderr: `ModuleNotFoundError: No module named 'icecr
       "pyrsistent"` immediately after the fork's `dump_pdb` build-time assertion, with the full
       per-package audit recorded inline as a comment.
 
-**Not yet rebuilt or re-verified** — this is a source-level fix pending the user's next
-`build-image.sh` → `verify-image.sh` cycle on Grex.
+- [x] **Confirmed 2026-08-06, third execution**: rebuilt and re-verified on the same CPU node —
+      **PASS 9 / FAIL 3**, check 6 fully passing, the 3 FAILs being exactly the predicted GPU-gated
+      set (checks 1, 2, JAX device test). U1's CPU-verifiable surface is clean; only the GPU-gated
+      checks remain.
+
+### Step 11: §3 risk materialized on real GPU — jax/jaxlib/chex re-pinned (added 2026-08-06, first GPU execution)
+
+The first GPU allocation reached exactly the risk `infrastructure-design.md` §3 named from the
+start: `jaxlib==0.4.25+cuda11.cudnn86` failed with `CUDA backend failed to initialize: Found CUDA
+version 11060, but JAX was built against version 11080, which is newer.`
+
+- [x] Root-caused via JAX's own `CHANGELOG.md` rather than trial-and-error version bisection: `jax
+      0.4.8` (2023-03-29) is the exact release that dropped CUDA 11.4 support and moved cuda11
+      wheels to a CUDA 11.8 build baseline. Every cuda11 jaxlib from 0.4.8 onward — including
+      0.4.25 — requires CUDA ≥ 11.8; this base image ships CUDA 11.6.2. **`jaxlib 0.4.7` is the
+      newest cuda11 build that predates the bump** — confirmed against the full wheel index, not
+      assumed from the pre-existing fallback-ladder text.
+- [x] Checked whether downgrading jax alone is sufficient (it is not): queried PyPI's release
+      history for `chex`, `optax`, `dm-haiku` — the exact extras pinned alongside jax 0.4.25 — for
+      their declared jax lower bounds. `chex==0.1.86` requires `jax>=0.4.16`, which `jax==0.4.7`
+      violates. `chex 0.1.82` (2023-07-20) is the newest chex release still requiring only
+      `jax>=0.4.6`. `optax==0.2.2` and `dm-haiku==0.0.12` need no change (see reasoning above).
+- [x] `containers/rfdiffusion.def` — the single resolution pass now installs `jax==0.4.7`,
+      `jaxlib==0.4.7+cuda11.cudnn86`, `chex==0.1.82`, `optax==0.2.2`, `dm-haiku==0.0.12`. The
+      pip-supplied cuDNN 8.6 is unchanged — that problem is orthogonal to the CUDA-version mismatch.
+      `%labels` and the build-time guard's example text updated to match; the guard's comment now
+      also notes explicitly what it does *not* catch (a CUDA build requiring a newer runtime than
+      the base provides — only a real GPU run can catch that).
+- [x] `bash -n` clean on the extracted `%post` block.
+
+**Not yet rebuilt or re-verified on GPU** — pending the user's next `build-image.sh` →
+`verify-image.sh` cycle, this time on a GPU allocation.
 
 ---
 

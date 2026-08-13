@@ -315,19 +315,67 @@ without any script change.
 `uv pip install --python "$VPY" --no-cache "icecream" "pyrsistent"` immediately after the fork's
 `dump_pdb` build-time assertion, with the full per-package audit recorded inline.
 
-**Not yet rebuilt** — this changes image *content*, unlike Defects 1/2/2b which only changed the
-verification script. It requires a real `build-image.sh` rebuild before it can be confirmed.
+**Rebuilt and re-verified, same CPU node, third execution (2026-08-06): PASS 9 / FAIL 3.** Defect 3
+confirmed fixed — check 6 now passes in full (`icecream` and `pyrsistent` resolved the fork's real
+missing dependencies, and no further hidden import gap surfaced). The 3 FAILs are exactly the
+predicted set: checks 1, 2, and the JAX device test — all genuinely GPU-gated, nothing else.
+
+**U1's CPU-verifiable surface is now completely clean.** Three rounds, three real defects found and
+fixed (2 in the verification script, 1 in the image), zero remaining CPU-checkable unknowns.
+
+---
+
+## Verification Results — first GPU execution (2026-08-06, same node, real allocation)
+
+The §3 risk this project has carried since the infrastructure design — "ColabDesign may require a
+newer JAX than is available for CUDA 11.6" — **materialized**, though inverted from its anticipated
+shape: not ColabDesign needing newer JAX, but **JAX itself needing newer CUDA**.
+
+```
+CUDA backend failed to initialize: Found CUDA version 11060, but JAX was built against
+version 11080, which is newer.
+```
+
+`jaxlib 0.4.25+cuda11.cudnn86` — the pin verified as intact through all three CPU rounds — was
+compiled against CUDA 11.8; this base image runs CUDA 11.6.2. CUDA's compatibility model only runs
+one direction (newer runtime, older build), so this genuinely cannot work as pinned.
+
+**Root-caused from JAX's `CHANGELOG.md`**: `jax 0.4.8` (2023-03-29) is the release where "CUDA 11.4
+support has been dropped. JAX GPU wheels only support CUDA 11.8 and CUDA 12." Every cuda11 jaxlib
+from 0.4.8 onward needs CUDA ≥ 11.8. **`jaxlib 0.4.7` is the newest cuda11 build predating that
+requirement** — confirmed by enumerating the complete wheel index, not assumed from the pre-existing
+fallback-ladder text (which named 0.4.7 but paired it with `cudnn82`, not the `cudnn86` this fix
+actually uses — see below).
+
+**Downgrading jax alone would have failed the next resolution pass**: `chex==0.1.86` requires
+`jax>=0.4.16`; `jax==0.4.7` violates that. Checked chex's PyPI history for exactly where the floor
+moved (bumped in `0.1.83`, 2023-09-20) and picked **`chex==0.1.82`** — the newest release still
+accepting `jax>=0.4.6`. `optax==0.2.2` and `dm-haiku==0.0.12` needed no change: verified each
+package's actual `requires_dist` rather than assuming the whole extras set needed re-pinning.
+
+**Fixed in `containers/rfdiffusion.def`**: `jax==0.4.7`, `jaxlib==0.4.7+cuda11.cudnn86` (kept on
+`cudnn86`, not `cudnn82` — the pip-supplied cuDNN 8.6 already works and switching it would have been
+an unrelated second variable), `chex==0.1.82`. `%labels` and the build-time guard's comments updated
+to match; the guard's comment now states plainly what it can and cannot catch — it asserts jaxlib
+*is* a CUDA build, never that the CUDA build is *new enough* for this runtime.
+
+**Not yet rebuilt or re-verified on GPU.**
 
 ---
 
 ## Next
 
-- **User**: **rebuild the image** (`scripts/build-image.sh`) to pick up the `icecream` /
-  `pyrsistent` fix, then re-stage if the rebuild invalidates the cached image, then re-run
-  `verify-image.sh` on CPU. Expect check 6 to reach further — possibly to a full pass, possibly to
-  a *different* still-undiscovered gap; treat either as real signal, not noise
-- **Then**: a short GPU allocation (`--time=0-00:15:00`, multi-partition) for checks 1, 2, and the
-  JAX device test. This remains the only verification surface that genuinely needs a GPU, and the
-  JAX device test is the real open risk (§3) — still unconfirmed either way
-- **In parallel**: U2b Runner — Functional Design is complete and awaiting Code Generation
-- **Then**: milestone M1 (a real design via hand-written `sbatch`)
+- **User**: **rebuild the image** (`scripts/build-image.sh`) to pick up the `jax`/`jaxlib`/`chex`
+  re-pin, then a short multi-partition GPU allocation to re-verify:
+  ```bash
+  salloc --partition=agpu,stamps-b,mcordgpu-b,gpu,livi-b --gpus=1 --cpus-per-task=2 --mem-per-cpu=4000M --time=0-00:15:00
+  ```
+  then `bash scripts/verify-image.sh`. Expect **PASS 12 / FAIL 0** if `jaxlib 0.4.7` resolves the
+  CUDA mismatch and ColabDesign has no other incompatibility at this older jax version.
+- **If the JAX device check still fails**, the CUDA-11 ceiling is now firmly established at 0.4.7 —
+  there is no Tier 1.5 to try. Go straight to the pre-planned Tier 2 fallback (§3 of
+  `infrastructure-design.md`, Q3 = B): two images, `colabdesign.sif` on a CUDA 12 base.
+- **On a full pass**: U1 is fully verified and done. That closes the last open item before
+  **milestone M1** (a real design via hand-written `sbatch`).
+- **In parallel, not blocked by the above**: U2b Runner — Functional Design is complete and awaiting
+  Code Generation.
