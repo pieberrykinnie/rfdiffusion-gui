@@ -636,3 +636,25 @@ Build FAILED (exit 255).
 **Context**: CONSTRUCTION - U1 Code Generation - stage approved complete, main updated to a clean done-with-U1 state for parallel worktree use
 
 ---
+
+## Session Resume - New Worktree, Re-Establishing State
+**Timestamp**: 2026-08-13T17:01:08Z
+**User Input**: "Using AI-DLC, continue where we left off."
+**AI Response**: "New session in worktree `next-aidlc`, branched from main at 1da6bb2 (U1 fully verified). Read aidlc-state.md, git log, and audit.md tail to re-establish position rather than assuming. Confirmed: U1 and U2a are both fully complete and committed to main. U2b Runner Functional Design artifacts (business-logic-model.md, business-rules.md, domain-entities.md) were generated and committed on 2026-08-01 (commit 2a22610) and the audit log shows the approval gate was reached and presented ('Presenting for approval before proceeding to Code Generation', audit.md line 350) - but the session moved on to U1 GPU verification work immediately after without the user ever explicitly approving or requesting changes. No approval or rejection response exists in the audit trail for this gate. Read all three U2b functional-design artifacts in full to verify they are still accurate and self-consistent (they are - no drift against the now-completed U1 image behaviour, e.g. the /scratch/schedules mkdir requirement and container Python path both match U1's final verified state). Re-presenting the standardized Functional Design completion message now, per functional-design.md Step 7/8, rather than assuming approval or silently proceeding to Code Generation, since this is a mandatory blocking gate that was never actually cleared."
+**Context**: CONSTRUCTION - U2b Runner Functional Design - resuming at an un-cleared approval gate found via audit trail review
+
+---
+
+## U2b Runner Functional Design - Approval
+**Timestamp**: 2026-08-13T17:02:52Z
+**User Input**: "Continue to Next Stage"
+**AI Response**: "U2b Runner Functional Design approved (the gate first reached 2026-08-01 and re-presented this session after confirming it was never actually cleared). Proceeding to U2b Code Generation. Loading construction/code-generation.md to build the Part 1 plan before writing any code."
+**Context**: CONSTRUCTION - U2b Runner Functional Design - APPROVED, proceeding to Code Generation
+
+---
+
+## U2b Code Generation - Plan Created, Approval Requested
+**Timestamp**: 2026-08-13T17:08:44Z
+**User Input**: (none yet - presenting plan for approval)
+**AI Response**: "Before writing the plan, read component-methods.md/components.md C-11..C-20, services.md S-4, unit-of-work.md's U2b section, the story-map's U2b requirement rows, and every rfd-core source file the runner will call (models.py, argv.py, symmetry.py, iterations.py, modes.py, contigs.py, paths.py, storage.py) to plan against real signatures rather than the application-design sketch alone. Cross-checked the sketch's env-var assumptions against the ACTUAL containers/rfdiffusion.def (not infrastructure-design.md's earlier draft, which used slightly different names) and found it already sets RFD_FORK, RFD_MODELS=/opt/RFdiffusion/models (checkpoints baked into the base image per U1 8.1d, not staged separately), RFD_AF_PARAMS=/opt/weights/alphafold, and ANANAS_BIN=/opt/weights/bin/ananas in %environment, plus the exact %runscript entry point (python -m rfd_runner). Read reference/diffusion.py's commented provisioning cell (lines 79-142, 227-354, 478-517) to transcribe get_pdb, run_ananas, run, run_diffusion, and the ProteinMPNN/AlphaFold/zip cells precisely rather than from memory. Made one design decision without blocking on it: a single _colabdesign.py bridge module for every ColabDesign/fork import (pdb_to_string, parse_pdb, fix_contigs, fix_partial_contigs, fix_pdb, sym_it), each a lazy import inside a thin function - extends components.md's existing 'ContigNormaliser is the only component that must import ColabDesign' principle to the two other call sites (PdbPostProcessor, SymmetryDetector) that also need it, giving every test one obvious seam and making the unit-of-work table's 'partially testable without cluster' claim concretely true rather than aspirational. Wrote aidlc-docs/construction/plans/u2b-code-generation-plan.md: 7 steps (Project Structure, Business Logic Generation across 13 new files, Business Logic Unit Testing across 10 test files using injectable popen_factory/fetch/run_cmd/fix_* seams rather than any real subprocess or GPU, Business Logic Summary, Documentation, a small env.example addition for RFD_STEP_TIMEOUT_SECONDS/RFD_POLL_INTERVAL_MS, and Local Verification proving the package imports and its non-GPU logic passes on real Python 3.9.25 with zero ColabDesign/torch/JAX installed). Presenting for approval before generation."
+**Context**: CONSTRUCTION - U2b Code Generation - Part 1 plan created, approval gate reached
