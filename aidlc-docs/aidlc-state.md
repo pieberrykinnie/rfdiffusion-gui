@@ -523,9 +523,29 @@ Workflow Planning and favours skipping optional stages.
         moved, not removed, until much later). ColabDesign's `setup.py` pins no `dm-haiku` version
         at all (re-confirmed), so no cascading conflict. **Fixed**: `dm-haiku==0.0.12` →
         `dm-haiku==0.0.10` in `rfdiffusion.def`, comment block rewritten with the full research
-        trail. **Not yet rebuilt or re-verified.**
+        trail.
+      - ⚠️ **Third real execution (job 7442555, node `g325`) FAILED** — confirms the `dm-haiku`
+        fix: traceback advances one more frame, past `haiku` entirely, into
+        `colabdesign/af/alphafold/model/config.py`. **Root cause:
+        `ModuleNotFoundError: No module named 'ml_collections'`** — ColabDesign is installed
+        `--no-deps` (deliberately, so it cannot perturb the jax/chex/optax/dm-haiku resolution),
+        so none of its own `setup.py install_requires` were ever pulled in automatically.
+        Diffed the full list against what's already installed rather than fixing one import at a
+        time: genuine gap is `ml-collections`, `biopython`, `dm-tree`, `pandas`, `scipy`,
+        `matplotlib` (six packages — `absl-py`/`numpy` already come in transitively via
+        `dm-haiku`/`chex`/`optax`). **Caught a second risk before it caused a fourth failure**: a
+        local dry-run resolve of these six alongside the existing jax/jaxlib pins picked
+        `numpy==2.0.2` — a NumPy 2.0 ABI break against the March-2023 `jaxlib==0.4.7` wheel. The
+        already-verified PASS-13 GPU run proves the base image's real numpy is safely `<2`, so this
+        was working by installation-order accident, not an enforced constraint. Checked
+        scipy/pandas/matplotlib's actual PyPI `requires_dist` for a safe floor and re-pinned
+        `numpy>=1.23,<2` — dry-run resolves cleanly to `numpy==1.26.4`. **Fixed**: all six packages
+        plus the `numpy` pin added to the *same* one-resolution-pass `uv pip install` command (per
+        that section's own stated principle). **Not yet rebuilt or re-verified** — and explicitly
+        flagged that the local dry-run tests dependency resolution only, not real container import
+        success; a fourth gap is possible if ColabDesign's own `setup.py` is itself incomplete.
       - **Next action is the user's**: `bash scripts/build-image.sh` (inside a CPU `salloc`, not
-        on a login node) to rebuild with both fixes, then re-run
+        on a login node) to rebuild with all three fixes, then re-run
         `sbatch scripts/m1-submit.sh <run_dir>` (a fresh `run_dir` from `m1-prepare-run.sh`, or
         the existing one — `RunRecord` is idempotent to reload) and report back the
         `sacct`/job-log output again
@@ -541,11 +561,14 @@ prepared and awaiting execution on real Grex hardware.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
 - **Current Stage**: **Milestone M1 — blocked on real Grex GPU execution.** U1 + U2a + U2b are all
   code-complete and approved. This is the gate: it requires the user to run a hand-written `sbatch`
-  job on a real Grex login/GPU node, which this environment cannot do itself. **Two attempts so
-  far, two different root causes found and fixed, neither yet re-verified**: (1, job 7441234)
-  `pydantic` missing from the image — fixed, rebuild (job 7441239) confirmed it; (2, job 7441266)
-  `dm-haiku==0.0.12` imports `jax.extend`, which cannot coexist with the CUDA-11.6-mandated
-  `jax==0.4.7` ceiling — fixed by downgrading to `dm-haiku==0.0.10`, not yet rebuilt.
+  job on a real Grex login/GPU node, which this environment cannot do itself. **Three attempts so
+  far, three different root causes found and fixed, none yet re-verified**: (1, job 7441234)
+  `pydantic` missing — fixed, rebuild (job 7441239) confirmed it; (2, job 7441266)
+  `dm-haiku==0.0.12` imports `jax.extend`, incompatible with the CUDA-11.6-mandated `jax==0.4.7`
+  ceiling — fixed by downgrading to `dm-haiku==0.0.10`, rebuild confirmed it; (3, job 7442555)
+  ColabDesign's `--no-deps` install never pulled its own dependencies —
+  `ml-collections`/`biopython`/`dm-tree`/`pandas`/`scipy`/`matplotlib` added, plus a `numpy<2` pin
+  after a local dry-run surfaced a real NumPy-2.0 ABI-break risk. Not yet rebuilt.
 - **Completed**: U1 Code Generation and verification (2026-08-06/07, six rounds — three CPU, one
   GPU risk-materialization, one build-time resolver failure, one final GPU confirmation), U2a Core
   Domain (157 tests, 100% coverage, real Python 3.9.25), U2b Runner Functional Design and Code

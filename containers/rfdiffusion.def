@@ -217,15 +217,48 @@ From: rosettacommons/rfdiffusion
     #             this install does not request that extra) and it declares
     #             no unconditional flax dependency (only 0.0.11+ do), so no
     #             cascading conflict. ColabDesign's own setup.py pins no
-    #             dm-haiku version at all (--no-deps below anyway). NOT YET
-    #             RE-VERIFIED on GPU -- the next real Grex run is what
-    #             confirms this, not this reasoning alone.
+    #             dm-haiku version at all (--no-deps below anyway).
+    #
+    # ml-collections / biopython / dm-tree / pandas / scipy / matplotlib --
+    # found missing live on Milestone M1's third real GPU execution
+    # (2026-08-13): ColabDesign is installed --no-deps (below), so NONE of
+    # its own install_requires were ever pulled in automatically. The first
+    # of these to be hit (colabdesign.af.alphafold.model.config imports
+    # ml_collections) surfaced as a `ModuleNotFoundError` past two other
+    # already-fixed ones (pydantic, jax.extend) -- rather than fix these one
+    # import at a time across further cluster round trips, fetched
+    # ColabDesign's setup.py install_requires directly (already done once
+    # for the dm-haiku investigation above) and diffed it against everything
+    # already installed in this file: absl-py and numpy are already pulled
+    # in transitively by dm-haiku/chex/optax (no --no-deps on this command),
+    # leaving ml-collections, biopython, dm-tree, pandas, scipy, and
+    # matplotlib as the genuine gap. Added all six here, in the SAME
+    # resolution pass, rather than a separate later `uv pip install` --
+    # consistent with this section's own stated principle (a later separate
+    # install could silently upgrade something already resolved here).
+    #
+    # numpy<2 pin: dry-run resolving these six alongside the jax/jaxlib pins
+    # above (without them, i.e. an unconstrained equivalent) picked
+    # numpy==2.0.2 -- NumPy 2.0 broke ABI compatibility for C extensions
+    # built against the 1.x API, which is exactly what a March-2023
+    # `jaxlib==0.4.7` wheel is. The already-VERIFIED PASS-13 GPU run
+    # (2026-08-07) proves the base image's pre-existing numpy (from the
+    # already-baked-in torch/dgl/e3nn stack) is safely <2 -- this pin makes
+    # that an enforced constraint instead of an accident of installation
+    # order, so a future package addition here fails loudly at build time
+    # instead of silently crossing the ABI boundary. Confirmed compatible
+    # with scipy 1.13.1 (numpy<2.3,>=1.22.4), pandas 2.3.3 (numpy>=1.22.4
+    # for Python<3.11, which this image is), and matplotlib 3.9.4
+    # (numpy>=1.23) via their own PyPI requires_dist -- a dry-run resolve of
+    # this exact set (jax/jaxlib pinned, numpy<2 pinned) picks numpy==1.26.4
+    # with no conflicts.
     uv pip install --python "$VPY" --no-cache \
         "jax==0.4.7" \
         "jaxlib==0.4.7+cuda11.cudnn86" \
         "opt_einsum_fx" \
         "py3Dmol" "joblib" "immutabledict" \
         "chex==0.1.82" "optax==0.1.7" "dm-haiku==0.0.10" \
+        "numpy>=1.23,<2" "ml-collections" "biopython" "dm-tree" "pandas" "scipy" "matplotlib" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
     # ColabDesign last, with --no-deps, so it cannot perturb the set above.
