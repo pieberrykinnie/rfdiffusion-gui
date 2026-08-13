@@ -475,8 +475,24 @@ Workflow Planning and favours skipping optional stages.
       - Artifacts: `packages/rfd-runner/` (15 source modules, 542 statements), `env.example`
         (`RFD_STEP_TIMEOUT_SECONDS`, `RFD_POLL_INTERVAL_MS` added), documentation at
         `aidlc-docs/construction/u2b-runner/code/u2b-code-summary.md`
-      - Awaiting user review/approval of the generated code
-- [ ] **Milestone M1** — working CLI pipeline, verified by hand-written `sbatch` on a Grex GPU node
+      - **Code Generation APPROVED 2026-08-13** ("Approve code generation and continue with AI-DLC
+        until the codebase is at a gate that requires verification on grex")
+- [ ] **Milestone M1** — working CLI pipeline, verified by hand-written `sbatch` on a Grex GPU node.
+      **BLOCKED ON REAL GREX HARDWARE — this is the gate.** Verification artifacts prepared
+      2026-08-13, not yet executed:
+      - `scripts/m1-prepare-run.sh` — builds a run directory + minimal `run.json` (an 80-residue
+        de novo `DesignMode.FREE` smoke test, `--stage all`), validated locally against the real
+        `rfd_core.RunRecord` model (Python 3.9.25) before being written to disk
+      - `scripts/m1-submit.sh` — hand-written `sbatch` script, the concrete instance of
+        deployment-architecture.md section 3's template; `bash -n` clean; checked line-by-line
+        against G-1…G-18 in `docs/m1-verification.md`
+      - `docs/m1-verification.md` — step-by-step instructions, exit-criteria checklist (per
+        unit-of-work.md's 5 M1 exit criteria), and an explicit scope-limits section (this smoke
+        test exercises `DesignMode.FREE` only — template resolution and AnAnaS/`symmetry=auto`
+        are not exercised and remain open for a later spot-check)
+      - **Next action is the user's**: run `bash scripts/m1-prepare-run.sh` then
+        `sbatch scripts/m1-submit.sh <run_dir>` on a Grex login node, and report back the
+        `sacct`/job-log output
 - [ ] U3 Slurm Integration and Persistence: Functional Design **EXECUTE** → Code Generation **EXECUTE**
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
 - [ ] U4 Web Application: Code Generation **EXECUTE**
@@ -484,23 +500,28 @@ Workflow Planning and favours skipping optional stages.
 - [ ] Build and Test - **EXECUTE**
 
 ## Current Status
-*(Corrected 2026-08-13 — U2b Runner code generation is now complete; see below.)*
+*(Corrected 2026-08-13 — U2b Runner code generation approved; Milestone M1 verification artifacts
+prepared and awaiting execution on real Grex hardware.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: **U2b Runner Code Generation COMPLETE** (74 tests, 97% coverage — 100% outside
-  the structurally-untestable `_colabdesign.py` bridge). Awaiting user review/approval of the
-  generated code before proceeding to Build and Test / Milestone M1
+- **Current Stage**: **Milestone M1 — blocked on real Grex GPU execution.** U1 + U2a + U2b are all
+  code-complete and approved. This is the gate: it requires the user to run a hand-written `sbatch`
+  job on a real Grex login/GPU node, which this environment cannot do itself.
 - **Completed**: U1 Code Generation and verification (2026-08-06/07, six rounds — three CPU, one
   GPU risk-materialization, one build-time resolver failure, one final GPU confirmation), U2a Core
   Domain (157 tests, 100% coverage, real Python 3.9.25), U2b Runner Functional Design and Code
-  Generation (74 tests, real Python 3.9.25, zero ColabDesign/torch/JAX installed)
-- **Next Stage**: user review of U2b's generated code, then **Milestone M1** — a real design via
-  hand-written `sbatch` on a Grex GPU node, exercising U1 + U2a + U2b together for the first time
+  Generation (74 tests, real Python 3.9.25, zero ColabDesign/torch/JAX installed) — **APPROVED
+  2026-08-13**
+- **Next Stage**: **Milestone M1** — the user runs `bash scripts/m1-prepare-run.sh` then
+  `sbatch scripts/m1-submit.sh <run_dir>` on a Grex login node (full instructions:
+  `docs/m1-verification.md`), then reports the `sacct`/job-log output back so it can be checked
+  against the 5 exit criteria in unit-of-work.md. Only after M1 passes does AI-DLC proceed to U3.
 - **Status**: **U1 is done.** FR-16/FR-17 confirmed achievable (sokrypton fork on PYTHONPATH,
   `dump_pdb` present); the §3 risk this project carried since infrastructure design (`jaxlib 0.4.25`
   needing CUDA ≥ 11.8 against an 11.6.2 base) materialized, was root-caused via JAX's changelog, and
   is now closed — `jax==0.4.7` / `jaxlib==0.4.7+cuda11.cudnn86` / `chex==0.1.82` / `optax==0.1.7`
   verified on a real NVIDIA A30. Tier 2 (§3, two images) was never needed. **U2a and U2b are both
-  code-complete. Milestone M1 is unblocked pending Grex GPU access and user review.**
+  code-complete and approved. Milestone M1 verification artifacts are prepared; execution is
+  pending Grex GPU access.**
 - **Next milestone**: **M1** — a real design via hand-written `sbatch` on a Grex GPU node
 
 ### OPERATIONS PHASE
