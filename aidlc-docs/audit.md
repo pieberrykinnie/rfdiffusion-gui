@@ -462,3 +462,74 @@ Following AI-DLC and continuing with U1, what now?"
 **Context**: CONSTRUCTION - U1 Code Generation - verification defects fixed, six artifacts updated, two stale seed references corrected
 
 ---
+
+## Git - Branch, Commit Split by Unit, and Fast-Forward Merge to main
+**Timestamp**: 2026-08-06T23:10:00Z (approx)
+**User Input**: "Add and commit changes according to their respective units."
+**AI Response**: "Surveyed the full working tree (git status, package inventory, .gitignore) before staging anything, since the tree carried uncommitted U1 script fixes plus unstaged U2a and U2b work from earlier in the session. Found .hypothesis/ untracked and unignored - added it to .gitignore before staging so the pytest cache would not be swept into a commit. Created branch u1-verification-fixes off main rather than committing directly, then produced four commits by unit: U1 (scripts/verify-image.sh + docs/setup.md + U1 plan/summary/infra-design docs), U2a (packages/rfd-core/ + workspace pyproject.toml/uv.lock + U2a plan/design docs + the .gitignore fix), U2b (u2b-runner functional-design docs only, since code generation has not started), and a fourth cross-cutting commit for aidlc-state.md/audit.md - explicitly noted in that commit's message that these two files could not be split per-unit because they are single files spanning every unit's history. Verified working tree clean after all four commits."
+**Context**: CONSTRUCTION - repository housekeeping, four commits created on u1-verification-fixes branch
+
+---
+
+## Git - Fast-Forward main
+**Timestamp**: 2026-08-06T23:15:00Z (approx)
+**User Input**: "proceed with running `git checkout main && git merge --ff-only u1-verification-fixes` for now, I'll begin proper worktrees after finishing verifying U1 on grex"
+**AI Response**: "Ran exactly the two commands given. Fast-forwarded cleanly (7148820..a0dec36, 42 files, +4153/-29), confirmed with git log and git status --porcelain that the tree was clean afterward. Flagged that main was now 4 commits ahead of origin/main with nothing pushed, and that the now-redundant u1-verification-fixes branch pointer could be dropped with git branch -d whenever convenient - did not delete it unprompted."
+**Context**: CONSTRUCTION - main fast-forwarded to a0dec36, not yet pushed
+
+---
+
+## Git - Push
+**Timestamp**: 2026-08-06T23:20:00Z (approx)
+**User Input**: "push it"
+**AI Response**: "Ran git push origin main. Reported 'Everything up-to-date' - the remote was already at a0dec36, so no new data was transferred; confirmed via git log and git status that local and origin/main match."
+**Context**: CONSTRUCTION - main pushed (already in sync)
+
+---
+
+## U1 Verification - Third Real Execution Attempt: A Genuine Image Defect
+**Timestamp**: 2026-08-06T23:30:00Z (approx)
+**User Input**: "With the following node:
+
+```
+$ salloc --partition=skylake --cpus-per-task=2 --mem=8000M --time=0-00:20:00
+```
+
+Ran:
+
+```
+$ ./scripts/verify-image.sh
+```
+
+Output:
+
+```
+Verifying /home/vuqh1/rfd-images/rfdiffusion.sif
+[...]
+=== 4. JAX imports and sees the GPU (known CUDA-11 risk)
+    jax 0.4.25
+    jaxlib 0.4.25+cuda11.cudnn86
+    devices [CpuDevice(id=0)]
+  [ OK ]   jaxlib is a CUDA build (pin survived dependency resolution)
+  [ FAIL ] JAX imports but reports no GPU (CPU fallback would be very slow).
+[...]
+=== 6. RFdiffusion entry point runs
+    Traceback (most recent call last):
+      File \"<string>\", line 1, in <module>
+      File \"/opt/RFdiffusion/inference/utils.py\", line 8, in <module>
+        from diffusion import get_beta_schedule
+      File \"/opt/RFdiffusion/diffusion.py\", line 19, in <module>
+        from diff_util import th_min_angle, th_interpolate_angles
+      File \"/opt/RFdiffusion/diff_util.py\", line 6, in <module>
+        from icecream import ic
+    ModuleNotFoundError: No module named 'icecream'
+  [ FAIL ] cannot run or import RFdiffusion from the fork
+[...]
+=== Summary
+  PASS 8   FAIL 4
+```
+[full output supplied]"
+**AI Response**: "Read the new output as validation of the prior round's fixes before treating anything as a new problem. CONFIRMED WORKING: check 4 now correctly FAILS on this CPU node against [CpuDevice(id=0)] - previously this exact output produced a false OK, so this is Defect 1's fix behaving exactly as designed, not a regression, despite PASS dropping from 9 to 8. CONFIRMED WORKING: no FileExistsError recurred: import proceeded past the schedules symlink to a later, different failure - direct evidence Defect 2's mkdir -p \"$SCRATCH/schedules\" fix works. NEW FINDING, ONLY VISIBLE BECAUSE OF THE DEFECT 2B STDERR FIX: ModuleNotFoundError: No module named 'icecream' - under the old script this would again have been swallowed into the uninformative 'cannot run or import RFdiffusion from the fork'. INVESTIGATED VIA SOURCE RATHER THAN PATCHING BLIND: grepped reference/diffusion.py and found the exact origin - a commented-out Colab cell 2 installing 'jedi omegaconf hydra-core icecream pyrsistent pynvml decorator', none of which rfdiffusion.def carries over because it inherits the RosettaCommons base image's install list, built for a different codebase. Rather than install all six defensively, downloaded the actual fork source at the pinned commit (597d37f2, via raw.githubusercontent.com and a full tarball fetch into scratch) and read every import across the whole tree. CONFIRMED icecream is imported unconditionally by six files including the entry point run_inference.py itself. CONFIRMED pyrsistent is imported by inference/symmetry.py ('from pyrsistent import v') - directly relevant since this project exposes a symmetry feature (rfd_core.symmetry, U2b SymmetryDetection). CONFIRMED jedi has zero references anywhere in the fork - Colab-only tab completion, correctly excluded. INVESTIGATED pynvml/decorator specifically rather than assuming they were needed because SE3Transformer's own requirements.txt lists them: fetched SE3Transformer's setup.py and found it declares NO install_requires (bare find_packages() only), then traced which files import se3_transformer.runtime.gpu_affinity (where pynvml is used) - found only se3_transformer.runtime.training and .inference, NVIDIA's own distributed-training/benchmark harness, and confirmed via a full-tree grep that RFdiffusion itself imports only se3_transformer.model (SE3_network.py), never .runtime at all - so pynvml and decorator are genuinely unreachable dead weight if added, not a fix. ALSO TRACED THE FULL IMPORT CHAIN to establish that fixing icecream alone would not have been sufficient to declare check 6 complete: run_inference.py imports inference.utils at module level, which imports inference.model_runners at module level, which imports inference.symmetry at module level, which imports pyrsistent at module level - all eager, all before Hydra's @hydra.main ever dispatches on --help. This meant pyrsistent's absence was guaranteed to surface on the very next run regardless, so fixing both together in one pass avoided a fourth cluster round-trip, and confirmed the existing check 6 needs no modification since it already exercises this whole chain. FIXED: added uv pip install --python \"$VPY\" --no-cache \"icecream\" \"pyrsistent\" to containers/rfdiffusion.def immediately after the fork's dump_pdb build-time assertion, with the full per-package audit table recorded inline as a comment so a future contributor does not have to redo this research if the pinned fork commit ever changes. UPDATED ALL RELEVANT ARTIFACTS consistent with the established pattern for this unit's corrections: u1-code-generation-plan.md (new Step 10, all sub-items checked), u1-code-summary.md (full second-execution results table plus the defect writeup and updated Next section pointing at a required rebuild), infrastructure-design.md (new section 8.1f in the same chronological build-findings style as 8.1a-8.1e, with the generalisable lesson that pinning the base image's installs says nothing about what an overlaid fork needs), aidlc-state.md (new dated section, Stage Progress U1 line and Current Status block both updated to reflect that a rebuild is now required before check 6 can pass), docs/setup.md (two new troubleshooting rows distinguishing a missing-module failure, which needs a rebuild, from the schedules FileExistsError, which should not recur). STATED PLAINLY WHAT IS NOT YET TRUE: this is a source-level fix only. The image has not been rebuilt and the fix is unconfirmed until the user runs build-image.sh and re-verifies - recorded as such in every artifact rather than implied as already resolved."
+**Context**: CONSTRUCTION - U1 Code Generation - genuine image content defect found via live execution, root-caused via source research rather than trial and error, fixed in rfdiffusion.def, seven artifacts updated, rebuild pending
+
+---

@@ -510,6 +510,43 @@ was only ever an optimisation — the `Diffuser` computes and caches any missing
 removed; `/opt/RFdiffusion/schedules` remains a symlink to writable `/scratch/schedules`, and the
 cost is a one-time CPU schedule generation per distinct `T`.
 
+### 8.1f ⚠️ Two fork dependencies missing from the base image (observed 2026-08-06, live verification)
+
+`verify-image.sh` check 6, on a real built and staged image on Grex, failed with
+`ModuleNotFoundError: No module named 'icecream'` (`diff_util.py:6`, imported via
+`inference/utils.py:8`) — the first defect this design missed that only a real execution could catch.
+
+**Root cause**: `reference/diffusion.py`'s commented-out cell 2 ran
+`pip install jedi omegaconf hydra-core icecream pyrsistent pynvml decorator` under Colab — a
+convenience cell for everything the fork might need, on a base image with no pins. `rfdiffusion.def`
+inherits the **RosettaCommons** base's install list, built for RosettaCommons's own codebase, which
+imports none of these six packages.
+
+**Resolved by reading the fork's actual imports at the pinned commit, not by installing the whole
+Colab cell defensively**:
+
+| Package | Needed? | Why |
+|---|---|---|
+| `icecream` | **Yes** | Imported unconditionally by the entry point (`run_inference.py`), `diff_util.py`, `contigs.py`, `potentials/manager.py`, `RoseTTAFoldModel.py`, `Embeddings.py` |
+| `pyrsistent` | **Yes** | `inference/symmetry.py`: `from pyrsistent import v` — the symmetry feature this project exposes depends on it directly |
+| `jedi` | No | Zero references in the fork; Colab tab-completion only |
+| `pynvml`, `decorator` | No | Listed in `env/SE3Transformer/requirements.txt`, but that file is decorative — `setup.py` declares no `install_requires`. Both are imported only by `se3_transformer.runtime.{training,inference}` (NVIDIA's own training/benchmark harness); RFdiffusion imports only `se3_transformer.model`, never `.runtime` |
+
+Both required packages sit on **one eager import chain** — `run_inference.py` → `inference.utils` →
+`inference.model_runners` → `inference.symmetry` → `pyrsistent` — so `verify-image.sh` check 6
+exercises both with no script change; fixing `icecream` alone would only have deferred discovering
+`pyrsistent` to a fourth build/stage/verify cycle.
+
+**Fixed**: `rfdiffusion.def` now runs `uv pip install "icecream" "pyrsistent"` into the fork's venv
+immediately after the `dump_pdb` build-time assertion. **Not yet rebuilt** — pending the next
+`build-image.sh` run.
+
+**Generalisable lesson, consistent with §8.1e**: pinning what the *base* image installs says nothing
+about what the *overlaid* fork needs. The Colab cell this project deliberately never executes (cell 2
+is commented out, per the original reverse-engineering findings) is nonetheless the only complete
+record of the fork's real third-party dependencies — it should have been cross-checked against the
+fork's actual imports during Step 2 of code generation, not discovered via a runtime traceback.
+
 ### 8.2 Remaining fallbacks
 
 If a staged `--fakeroot` build still fails: (1) Sylabs remote build `--remote`; (2) local

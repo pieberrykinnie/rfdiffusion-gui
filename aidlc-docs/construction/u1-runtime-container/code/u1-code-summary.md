@@ -252,11 +252,82 @@ manually via `RFD_ANANAS_URL` or drop the binary at `$RFD_WEIGHTS/bin/ananas`. *
 
 ---
 
+## Verification Results — second execution (2026-08-06, same CPU node `n339`)
+
+Confirmed both fixes, then found a **third defect — this one in the image itself, not the script**.
+Reported **PASS 8 / FAIL 4**, which is *better* than the prior PASS 9 / FAIL 3 despite the lower
+count: one FAIL is check 4 correctly flipping from a false pass to a true one (Defect 1's fix
+working exactly as intended), and the new FAIL is a real, previously-hidden problem the stderr fix
+(Defect 2b) made visible instead of swallowing.
+
+| Check | Result | Reading |
+|---|---|---|
+| 1, 2 | FAIL | Expected — CPU node |
+| 3 | PASS | Fork sha `597d37f2…` confirmed again |
+| 4 jaxlib CUDA build | PASS | Pin still intact |
+| **4 JAX sees GPU** | **FAIL** | **Correct now** — was a false PASS before Defect 1's fix; on this CPU node it should fail, and it does |
+| 5 | PASS | dgl / e3nn import |
+| **6** | **FAIL** | **New defect** — see below. Defect 2 (schedules `mkdir`) is confirmed fixed: no `FileExistsError`, a *different* error, further into the import chain |
+| 7 | PASS ×5, WARN ×1 | Unchanged |
+
+### Defect 2 confirmation
+
+The predicted `FileExistsError` did **not** recur. Import now proceeds past the schedules symlink
+and fails later, on a genuinely different line — direct evidence the Step 9 fix works.
+
+### Defect 3 — two pip packages missing from the image (found via Defect 2b's stderr fix)
+
+```
+ModuleNotFoundError: No module named 'icecream'
+  at /opt/RFdiffusion/diff_util.py:6, imported by inference/utils.py:8
+```
+
+This traceback was only visible **because** Defect 2b (stderr capture) had just been fixed — under
+the old script this would again have reported the uninformative `cannot run or import RFdiffusion
+from the fork`.
+
+**Root cause**: `reference/diffusion.py`'s commented-out cell 2 (Colab-only, never executed by the
+exported script) ran `pip install jedi omegaconf hydra-core icecream pyrsistent pynvml decorator` —
+a convenience cell for everything the fork might touch. `rfdiffusion.def` inherits the
+**RosettaCommons** base image's install list, which was built for a codebase that imports none of
+these six packages, so none of them shipped.
+
+**Investigated by downloading the fork source at the pinned commit and reading every import**,
+rather than installing the whole Colab cell defensively or fixing one `ModuleNotFoundError` at a
+time across repeated cluster round-trips:
+
+| Package | Needed? | Evidence |
+|---|---|---|
+| `icecream` | **Yes** | Imported unconditionally by `run_inference.py` (entry point), `diff_util.py`, `contigs.py`, `potentials/manager.py`, `RoseTTAFoldModel.py`, `Embeddings.py` |
+| `pyrsistent` | **Yes** | `inference/symmetry.py`: `from pyrsistent import v` — this project's symmetry feature depends on it directly |
+| `jedi` | No | Zero references anywhere in the fork; Colab tab-completion only |
+| `pynvml`, `decorator` | No | Real entries in `env/SE3Transformer/requirements.txt`, but that file is **decorative** — SE3Transformer's `setup.py` declares no `install_requires`. Both are imported only by `se3_transformer.runtime.{training,inference}`, NVIDIA's own training/benchmark harness. RFdiffusion imports only `se3_transformer.model` (`SE3_network.py`), never `.runtime` — confirmed by grepping the full fork tree at the pinned commit |
+| `omegaconf`, `hydra-core` | Already present | Pinned by the base image |
+
+**Both required packages are on the same eager import chain**, which matters operationally:
+`run_inference.py` → `inference.utils` → `inference.model_runners` → `inference.symmetry` →
+`pyrsistent`, all top-level imports. Fixing only `icecream` would have meant discovering
+`pyrsistent` missing on a *fourth* rebuild/restage/reverify cycle. Caught here at zero cluster cost,
+and confirms **check 6 needs no modification** — it will exercise both packages on the next run
+without any script change.
+
+**Fixed**: `containers/rfdiffusion.def` now runs
+`uv pip install --python "$VPY" --no-cache "icecream" "pyrsistent"` immediately after the fork's
+`dump_pdb` build-time assertion, with the full per-package audit recorded inline.
+
+**Not yet rebuilt** — this changes image *content*, unlike Defects 1/2/2b which only changed the
+verification script. It requires a real `build-image.sh` rebuild before it can be confirmed.
+
+---
+
 ## Next
 
-- **User**: re-run `verify-image.sh` on CPU to confirm the fixes — expect **PASS 9 / FAIL 3** again,
-  but a *different* three: checks 1, 2 and the JAX device test, all genuinely GPU-gated
-- **Then**: a short GPU allocation (`--time=0-00:15:00`, multi-partition) for those three. This is
-  the only remaining U1 verification surface, and the JAX device test is the real open risk
+- **User**: **rebuild the image** (`scripts/build-image.sh`) to pick up the `icecream` /
+  `pyrsistent` fix, then re-stage if the rebuild invalidates the cached image, then re-run
+  `verify-image.sh` on CPU. Expect check 6 to reach further — possibly to a full pass, possibly to
+  a *different* still-undiscovered gap; treat either as real signal, not noise
+- **Then**: a short GPU allocation (`--time=0-00:15:00`, multi-partition) for checks 1, 2, and the
+  JAX device test. This remains the only verification surface that genuinely needs a GPU, and the
+  JAX device test is the real open risk (§3) — still unconfirmed either way
 - **In parallel**: U2b Runner — Functional Design is complete and awaiting Code Generation
 - **Then**: milestone M1 (a real design via hand-written `sbatch`)

@@ -64,6 +64,9 @@ waiting to hit it.
 - [x] `containers/rfdiffusion.def` — `FROM rosettacommons/rfdiffusion`, overlay sokrypton fork at
       pinned SHA, ColabDesign at pinned SHA, JAX + cuDNN pins, `%environment` with `DGLBACKEND`,
       `PYTHONPATH`, and weight paths (NFR-4, G-17)
+- [x] **Corrected 2026-08-06** — `icecream` and `pyrsistent` added. Both are genuinely imported by
+      the fork's inference path (base image never installs them) and were missing from the shipped
+      image; see Step 9 in the code summary for the full defect and source-tree audit
 
 ### Step 3: Image build script
 - [x] `scripts/build-image.sh` — `module load singularity`, explicit `APPTAINER_CACHEDIR` (G-18),
@@ -113,6 +116,41 @@ the image. Neither is discoverable by `bash -n`, which is why they survived gene
 **Cross-unit consequence**: Defect 2 is the *first live confirmation* that U2b's documented
 `mkdir -p /scratch/schedules` precondition is load-bearing rather than defensive. U1's own
 verification script became the first consumer to violate it and failed exactly as predicted.
+
+### Step 10: Image content defect — two missing pip packages (added 2026-08-06, second execution)
+
+Re-running after Step 9's fixes surfaced a **third, genuine defect — this time in the image itself**,
+via check 6's now-preserved stderr: `ModuleNotFoundError: No module named 'icecream'`.
+
+- [x] Traced to source rather than patched blind. `reference/diffusion.py`'s commented-out cell 2
+      installed `jedi omegaconf hydra-core icecream pyrsistent pynvml decorator` for Colab — a
+      convenience cell covering everything the fork might need, onto a base with no pins of its own.
+      `rfdiffusion.def` inherits the **RosettaCommons** image's install list, built for a codebase
+      that imports none of these, so none shipped.
+- [x] Downloaded the fork source at the pinned commit (`597d37f2…`) and read every import rather
+      than adding the whole Colab cell defensively:
+  - **`icecream` — required.** Imported unconditionally by `run_inference.py` (the entry point),
+    `diff_util.py`, `contigs.py`, `potentials/manager.py`, `RoseTTAFoldModel.py`, `Embeddings.py`.
+  - **`pyrsistent` — required.** `inference/symmetry.py` does `from pyrsistent import v` — this
+    project's symmetry feature depends on it directly.
+  - **`jedi` — not needed.** Zero references anywhere in the fork; Colab tab-completion only.
+  - **`pynvml`, `decorator` — not needed for inference.** Real entries in
+    `env/SE3Transformer/requirements.txt`, but that file is decorative: SE3Transformer's `setup.py`
+    declares no `install_requires`. Both are imported only by
+    `se3_transformer.runtime.{training,inference}` — NVIDIA's own training/benchmark harness.
+    RFdiffusion imports only `se3_transformer.model` (`SE3_network.py`), never `.runtime`. Confirmed
+    by grepping the full fork tree; adding them would be unused weight, not a fix.
+- [x] Confirmed the *existing* check 6 already exercises both packages without modification: the
+      import chain is `run_inference.py` → `inference.utils` → `inference.model_runners` →
+      `inference.symmetry` → `pyrsistent`, all top-level imports, so fixing only `icecream` would
+      have meant discovering `pyrsistent` missing on a **fourth** cluster round-trip. Caught here
+      instead, at zero cluster cost.
+- [x] `containers/rfdiffusion.def` — added `uv pip install --python "$VPY" --no-cache "icecream"
+      "pyrsistent"` immediately after the fork's `dump_pdb` build-time assertion, with the full
+      per-package audit recorded inline as a comment.
+
+**Not yet rebuilt or re-verified** — this is a source-level fix pending the user's next
+`build-image.sh` → `verify-image.sh` cycle on Grex.
 
 ---
 

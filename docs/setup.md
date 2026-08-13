@@ -278,6 +278,8 @@ path is a CCDB-deposited key plus a conversation with Grex support.
 | Build fails pulling base layers | Registry rate limit or transient network | Rerun; layers are cached in `APPTAINER_CACHEDIR` |
 | Verify check 3 fails | Image lacks the sokrypton fork | Rebuild; check the `%post` clone step |
 | Verify check 4 fails | JAX/CUDA-11 incompatibility | Follow the fallback ladder in `rfdiffusion.def` |
+| Verify check 6 fails with `ModuleNotFoundError` | Image is missing a package the fork imports but the base image never installed | Rebuild — `rfdiffusion.def`'s `%post` pins the packages known to be needed (`icecream`, `pyrsistent`) as of the current pinned fork commit. If a future fork update adds a new import this can recur; diagnose the same way — read the traceback, then check whether the module is a real fork dependency (add it) or reachable only from an unused code path like SE3Transformer's own training harness (leave it out) |
+| Verify check 6 fails with `FileExistsError` on `schedules` | `/scratch/schedules` was never created before the fork's import-time `os.mkdir` hit its dangling symlink | Should not recur — `verify-image.sh` creates it; if it does, check the scratch bind is actually writable |
 | Verify reports sm_89 | You allocated `lgpu` | Use `gpu`, `agpu`, or a `-b` partition |
 | Tunnel asks for Duo every time | `ControlMaster` not configured, or master expired | Check `~/.ssh/config`; re-run `ssh grex` |
 | `uv sync` picks the wrong Python | System python3.6 on PATH | `uv` manages its own; ensure `requires-python` is respected |

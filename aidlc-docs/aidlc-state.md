@@ -42,6 +42,41 @@ Preemptible partitions carry a 1-hour minimum runtime guarantee, so short jobs c
 Carries into **U3** (symmetry UI must degrade) and **U2b** (its ananas-unavailable fail-fast rule is
 now a live path).
 
+## ⚠️ U1 Verification — Second Real Execution (2026-08-06, same node) — Defect 3, in the image
+
+Both `verify-image.sh` fixes confirmed working: check 4 now correctly FAILS on this CPU node
+(previously a false PASS), and Defect 2's predicted `FileExistsError` did not recur — import
+proceeded past the schedules symlink to a **different, later, real** failure:
+
+```
+ModuleNotFoundError: No module named 'icecream'
+```
+
+**This is the first defect found in the image itself**, not the verification script — and it was
+only visible because the Defect 2b stderr fix had just landed.
+
+**Root cause, run to ground by downloading the fork source at the pinned commit and reading every
+import** rather than patching one `ModuleNotFoundError` at a time across repeated cluster round
+trips: `reference/diffusion.py`'s commented-out Colab cell 2 installed six packages
+(`jedi omegaconf hydra-core icecream pyrsistent pynvml decorator`) that `rfdiffusion.def` never
+carried over, because it inherits the **RosettaCommons** base image's install list — built for a
+codebase that imports none of them.
+
+**Two are genuinely required**: `icecream` (entry point + five other fork modules import it
+unconditionally) and `pyrsistent` (`inference/symmetry.py` — this project's symmetry feature).
+**Three are not**: `jedi` (zero references anywhere in the fork), `pynvml`/`decorator` (real deps of
+SE3Transformer's *own* `requirements.txt`, but that file is decorative — `setup.py` declares no
+`install_requires`, and both are imported only by `se3_transformer.runtime`, which RFdiffusion never
+touches — it imports only `se3_transformer.model`).
+
+**Fixed in `containers/rfdiffusion.def`**: `uv pip install icecream pyrsistent` added after the
+`dump_pdb` assertion. **Not yet rebuilt** — this changes image content, so it needs a real
+`build-image.sh` run, unlike the prior round's script-only fixes.
+
+**Confirmed no further script change needed**: both packages sit on one eager top-level import chain
+(`run_inference.py` → `inference.utils` → `inference.model_runners` → `inference.symmetry` →
+`pyrsistent`), so the existing check 6 exercises both without modification.
+
 ## U2b Runner — Verified Facts (from source research, not assumption)
 1. **Hydra `config_path` resolves relative to the script file**, not cwd — `InferenceExecutor` needs
    no `cd` into `/opt/RFdiffusion`.
@@ -333,10 +368,15 @@ Workflow Planning and favours skipping optional stages.
         `env.example`, `docs/setup.md`, `reference/`, `.gitignore`
       - **Preflight verified on `yak`**: 16 PASS / 0 WARN / 0 FAIL
       - **Image built and weights staged on Grex** ✅
-      - **Verified on CPU node `n339` 2026-08-06** ✅ — check 3 (the approach-invalidating one)
-        PASSED; jaxlib CUDA pin intact; two defects found in `verify-image.sh` and fixed
-      - [ ] **Remaining**: re-run on CPU to confirm the fixes, then checks 1, 2 and the corrected
-        JAX device test on a short GPU allocation. **The §3 JAX/CUDA-11 risk is still open.**
+      - **Verified on CPU node `n339` 2026-08-06, first execution** ✅ — check 3 (the
+        approach-invalidating one) PASSED; jaxlib CUDA pin intact; two defects found in
+        `verify-image.sh` and fixed
+      - **Re-verified same node, second execution** — both script fixes confirmed; found and fixed
+        **Defect 3, in the image itself**: `icecream` and `pyrsistent` missing (see §8.1f). Image
+        rebuild is pending
+      - [ ] **Remaining**: rebuild the image, re-run on CPU to confirm Defect 3's fix, then checks 1,
+        2 and the corrected JAX device test on a short GPU allocation. **The §3 JAX/CUDA-11 risk is
+        still open.**
 - [x] U2a Core Domain: Functional Design **DONE** → Code Generation **DONE** 2026-08-01
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
       - 157 tests, 100% coverage, verified on real Python 3.9.25 locally
@@ -352,11 +392,13 @@ Workflow Planning and favours skipping optional stages.
 ## Current Status
 *(Corrected 2026-08-06 — this block had gone stale at Units Generation while CONSTRUCTION advanced.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: U1 verification in progress on Grex; U2b Runner Functional Design awaiting approval
-- **Completed**: U1 Code Generation (+ 2026-08-06 verification corrections), U2a Core Domain
-  (157 tests, 100% coverage, real Python 3.9.25)
-- **Next Stage**: U2b Runner — Code Generation
-- **Status**: U1 partially verified — **FR-16/FR-17 confirmed achievable**; GPU-gated checks pending
+- **Current Stage**: U1 verification in progress on Grex, image rebuild pending (Defect 3); U2b
+  Runner Functional Design awaiting approval
+- **Completed**: U1 Code Generation (+ 2026-08-06 verification corrections, two rounds), U2a Core
+  Domain (157 tests, 100% coverage, real Python 3.9.25)
+- **Next Stage**: U2b Runner — Code Generation (not blocked by U1's remaining GPU checks)
+- **Status**: U1 partially verified — **FR-16/FR-17 confirmed achievable**; image needs a rebuild for
+  Defect 3 (`icecream`/`pyrsistent`) before check 6 can pass; GPU-gated checks still pending
   a short allocation. Not blocking U2b.
 - **Next milestone**: **M1** — a real design via hand-written `sbatch` on a Grex GPU node
 

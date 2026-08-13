@@ -106,6 +106,41 @@ From: rosettacommons/rfdiffusion
     grep -q 'dump_pdb_path:' /opt/RFdiffusion/config/inference/base.yaml
 
     # -----------------------------------------------------------------------
+    # THE FORK NEEDS TWO PACKAGES THE BASE IMAGE DOES NOT INSTALL.
+    #
+    # reference/diffusion.py cell 2 (commented out, never executed by the
+    # exported script) did `pip install jedi omegaconf hydra-core icecream
+    # pyrsistent pynvml decorator` -- a Colab convenience cell installing
+    # everything the fork *might* touch, onto a base with no pins of its own.
+    # The RosettaCommons image's install list was built for RosettaCommons's
+    # own codebase, which does not import any of these, so none of them ship.
+    #
+    # Determined which are ACTUALLY required by fetching the fork source at
+    # the pinned commit and reading every import, rather than installing the
+    # whole Colab cell defensively:
+    #   icecream   -- REQUIRED. Imported unconditionally by run_inference.py
+    #                 (the entry point), diff_util.py, contigs.py,
+    #                 potentials/manager.py, RoseTTAFoldModel.py, Embeddings.py.
+    #                 Missing it fails before any real work starts.
+    #   pyrsistent -- REQUIRED. `from pyrsistent import v` in
+    #                 inference/symmetry.py -- this project's symmetry feature
+    #                 (rfd_core.symmetry, U2b SymmetryDetection) depends on it.
+    #   jedi       -- NOT needed. Zero references anywhere in the fork; it was
+    #                 only ever Colab's interactive tab-completion.
+    #   pynvml, decorator -- NOT needed for inference. Both are real deps of
+    #                 env/SE3Transformer/requirements.txt, but that file is
+    #                 decorative -- SE3Transformer's setup.py declares no
+    #                 install_requires. Both packages are imported only by
+    #                 se3_transformer.runtime.{training,inference}, NVIDIA's
+    #                 own training/benchmark harness; RFdiffusion imports only
+    #                 se3_transformer.model (SE3_network.py), never .runtime.
+    #                 Confirmed by grepping the full fork tree at the pinned
+    #                 commit -- adding them would be unused weight.
+    #   omegaconf, hydra-core -- already pinned by the base image.
+    # -----------------------------------------------------------------------
+    uv pip install --python "$VPY" --no-cache "icecream" "pyrsistent"
+
+    # -----------------------------------------------------------------------
     # JAX for ColabDesign (ProteinMPNN + AlphaFold).
     #
     # jaxlib 0.4.25+cuda11.cudnn86 is the NEWEST CUDA 11 build with cp39
