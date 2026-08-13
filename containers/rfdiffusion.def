@@ -252,13 +252,35 @@ From: rosettacommons/rfdiffusion
     # (numpy>=1.23) via their own PyPI requires_dist -- a dry-run resolve of
     # this exact set (jax/jaxlib pinned, numpy<2 pinned) picks numpy==1.26.4
     # with no conflicts.
+    #
+    # scipy==1.12.0 pin: found missing on Milestone M1's fourth real GPU
+    # execution -- the unbound "scipy" above resolved to 1.13.1, and
+    # jax==0.4.7's jax/_src/scipy/linalg.py does
+    # `@_wraps(scipy.linalg.tril)` / `@_wraps(scipy.linalg.triu)` at MODULE
+    # IMPORT TIME (decorator application, not a call site), so it needs
+    # those two names to exist as attributes of scipy.linalg regardless of
+    # whether jax's own tril/triu wrappers are ever called. Root-caused via
+    # scipy's own source across tags rather than guessed: scipy.linalg's
+    # public API still lists tril/triu as of the v1.12.0 tag; the v1.13.0
+    # tag has no trace of either name anywhere in scipy/linalg/__init__.py.
+    # This is a jax==0.4.7 (March 2023) vs. scipy>=1.13.0 (April 2024)
+    # incompatibility, same shape as the dm-haiku/jax.extend one above:
+    # jax==0.4.7 is fixed by the CUDA-11.6 ceiling, so the fix has to pin
+    # scipy backward instead. 1.12.0 (not e.g. 1.11.4) chosen because it's
+    # the newest release that still has tril/triu, minimizing drift from
+    # everything else in this list. Confirmed via PyPI requires_dist:
+    # scipy==1.12.0 needs numpy>=1.22.4,<1.29.0, compatible with the
+    # numpy>=1.23,<2 pin above; none of ml-collections/biopython/dm-tree
+    # declare a scipy dependency at all, and pandas's only scipy reference
+    # is behind its unused "computation"/"all" extras -- no cascading
+    # conflict from tightening this one package.
     uv pip install --python "$VPY" --no-cache \
         "jax==0.4.7" \
         "jaxlib==0.4.7+cuda11.cudnn86" \
         "opt_einsum_fx" \
         "py3Dmol" "joblib" "immutabledict" \
         "chex==0.1.82" "optax==0.1.7" "dm-haiku==0.0.10" \
-        "numpy>=1.23,<2" "ml-collections" "biopython" "dm-tree" "pandas" "scipy" "matplotlib" \
+        "numpy>=1.23,<2" "ml-collections" "biopython" "dm-tree" "pandas" "scipy==1.12.0" "matplotlib" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
     # ColabDesign last, with --no-deps, so it cannot perturb the set above.

@@ -544,8 +544,32 @@ Workflow Planning and favours skipping optional stages.
         that section's own stated principle). **Not yet rebuilt or re-verified** — and explicitly
         flagged that the local dry-run tests dependency resolution only, not real container import
         success; a fourth gap is possible if ColabDesign's own `setup.py` is itself incomplete.
+      - ✅ **Rebuild confirmed** (implicit — the fourth execution's traceback advances past every
+        prior failure point). ⚠️ **Fourth real execution (job 7443066, node `g325`) FAILED** —
+        confirms the six-package ColabDesign-dependency fix: the traceback advances well past
+        `ml_collections`/`config.py` this time, through ColabDesign's own `__init__` → `af.model` →
+        `shared.model` → a real `import optax` → optax's own internal `contrib` module →
+        `jax.scipy.stats.norm` — a chain that never executed before. **New root cause, not a
+        missing package this time**: `AttributeError: module 'scipy.linalg' has no attribute
+        'tril'`. `jax==0.4.7`'s `jax/_src/scipy/linalg.py` applies `@_wraps(scipy.linalg.tril)` /
+        `@_wraps(scipy.linalg.triu)` as decorators at **module import time**, so both names must
+        exist as attributes of `scipy.linalg` regardless of whether jax's own wrappers are ever
+        called. The previously-unbound `"scipy"` entry let `uv` resolve to `1.13.1` (confirmed by
+        the third-round dry-run note). **Root-caused by fetching `scipy/linalg/__init__.py` at the
+        v1.10.1, v1.11.4, and v1.12.0 tags** (all three still document `tril`/`triu`) **and at
+        v1.13.0** (zero occurrences of either name) — the removal lands exactly at scipy 1.13.0
+        (April 2024), a year after `jax==0.4.7` (March 2023) was written against the old API. Same
+        shape as the `dm-haiku`/`jax.extend` incompatibility: `jax==0.4.7` is fixed in place by the
+        CUDA-11.6 ceiling, so the fix pins scipy backward. Chose `1.12.0` — the newest release that
+        still has `tril`/`triu`, minimizing drift from the rest of the pinned set. Verified via
+        PyPI `requires_dist`: `scipy==1.12.0` needs `numpy>=1.22.4,<1.29.0` (compatible with the
+        existing `numpy>=1.23,<2` pin); `ml-collections`/`biopython`/`dm-tree` declare no scipy
+        dependency at all, and `pandas`'s only scipy reference is behind its unused
+        `computation`/`all` extras — no cascading conflict. **Fixed**: `"scipy"` →
+        `"scipy==1.12.0"` in `rfdiffusion.def`'s same one-resolution-pass install command. **Not
+        yet rebuilt or re-verified.**
       - **Next action is the user's**: `bash scripts/build-image.sh` (inside a CPU `salloc`, not
-        on a login node) to rebuild with all three fixes, then re-run
+        on a login node) to rebuild with the `scipy==1.12.0` pin, then re-run
         `sbatch scripts/m1-submit.sh <run_dir>` (a fresh `run_dir` from `m1-prepare-run.sh`, or
         the existing one — `RunRecord` is idempotent to reload) and report back the
         `sacct`/job-log output again
@@ -561,14 +585,17 @@ prepared and awaiting execution on real Grex hardware.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
 - **Current Stage**: **Milestone M1 — blocked on real Grex GPU execution.** U1 + U2a + U2b are all
   code-complete and approved. This is the gate: it requires the user to run a hand-written `sbatch`
-  job on a real Grex login/GPU node, which this environment cannot do itself. **Three attempts so
-  far, three different root causes found and fixed, none yet re-verified**: (1, job 7441234)
-  `pydantic` missing — fixed, rebuild (job 7441239) confirmed it; (2, job 7441266)
+  job on a real Grex login/GPU node, which this environment cannot do itself. **Four attempts so
+  far, four different root causes found and fixed, the fourth not yet re-verified**: (1, job
+  7441234) `pydantic` missing — fixed, rebuild (job 7441239) confirmed it; (2, job 7441266)
   `dm-haiku==0.0.12` imports `jax.extend`, incompatible with the CUDA-11.6-mandated `jax==0.4.7`
   ceiling — fixed by downgrading to `dm-haiku==0.0.10`, rebuild confirmed it; (3, job 7442555)
   ColabDesign's `--no-deps` install never pulled its own dependencies —
   `ml-collections`/`biopython`/`dm-tree`/`pandas`/`scipy`/`matplotlib` added, plus a `numpy<2` pin
-  after a local dry-run surfaced a real NumPy-2.0 ABI-break risk. Not yet rebuilt.
+  after a local dry-run surfaced a real NumPy-2.0 ABI-break risk — rebuild confirmed it; (4, job
+  7443066) unbound `scipy` resolved to `1.13.1`, which removed `scipy.linalg.tril`/`triu` that
+  `jax==0.4.7` references at module-import time — fixed by pinning `scipy==1.12.0`, the newest
+  release that still has both names. Not yet rebuilt.
 - **Completed**: U1 Code Generation and verification (2026-08-06/07, six rounds — three CPU, one
   GPU risk-materialization, one build-time resolver failure, one final GPU confirmation), U2a Core
   Domain (157 tests, 100% coverage, real Python 3.9.25), U2b Runner Functional Design and Code

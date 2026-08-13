@@ -774,3 +774,27 @@ ModuleNotFoundError: No module named 'ml_collections'
 **Context**: CONSTRUCTION - Milestone M1 - third real Grex execution FAILED, but confirms the dm-haiku 0.0.10 fix; new root cause (ModuleNotFoundError: ml_collections, from ColabDesign's --no-deps install never pulling its own dependencies) found and proactively fixed for the whole remaining gap (ml-collections, biopython, dm-tree, pandas, scipy, matplotlib) rather than one import at a time, with an explicit numpy<2 pin added after a local dry-run surfaced a real NumPy-2.0 ABI-break risk before it could cause a fourth failure; rebuild and re-verification pending
 
 ---
+
+## Milestone M1 - Fourth Real Grex Execution - Six-Package Fix Confirmed, New Failure: `scipy.linalg.tril`
+**Timestamp**: 2026-08-13T19:40:00Z (approx)
+**User Input**: "$ cat rfd-m1-smoke-7443066.err
+Traceback (most recent call last):
+  ...
+  File \"/opt/rfdgui/packages/rfd-runner/src/rfd_runner/_colabdesign.py\", line 41, in fix_contigs
+    from colabdesign.rf.utils import fix_contigs as _fix_contigs
+  File \".../colabdesign/__init__.py\", line 10, in <module>
+    from colabdesign.af.model import mk_af_model
+  ...
+  File \".../colabdesign/shared/model.py\", line 4, in <module>
+    import optax
+  File \".../optax/_src/contrib/mechanic.py\", line 38, in <module>
+    from optax._src import utils
+  File \".../optax/_src/utils.py\", line 22, in <module>
+    import jax.scipy.stats.norm as multivariate_normal
+  File \".../jax/_src/scipy/linalg.py\", line 409, in <module>
+    @_wraps(scipy.linalg.tril)
+AttributeError: module 'scipy.linalg' has no attribute 'tril'"
+**AI Response**: "Confirmed the six-package fix worked completely: the traceback advanced past ml_collections/config.py entirely, through colabdesign's own __init__ -> af.model -> shared.model -> a real `import optax` -> optax's own internal contrib module -> jax.scipy.stats.norm, a chain that never executed before. New, different, single-cause failure, and NOT a missing package this time -- an AttributeError, not a ModuleNotFoundError: jax==0.4.7's jax/_src/scipy/linalg.py does `@_wraps(scipy.linalg.tril)` and `@_wraps(scipy.linalg.triu)` as decorators applied at MODULE IMPORT TIME, so both names must exist as attributes of scipy.linalg the moment jax.scipy.linalg is imported, regardless of whether jax's own tril/triu wrappers are ever called downstream. The unbound `scipy` entry already in the one-resolution-pass install command let uv pick whatever the six-package fix's numpy<2 constraint still permitted -- 1.13.1, per the third-round audit entry's own dry-run note. ROOT-CAUSED VIA SOURCE, NOT GUESSED: fetched scipy/linalg/__init__.py at the v1.10.1, v1.11.4, and v1.12.0 git tags -- all three still document tril/triu in scipy.linalg's public API; fetched the same file at v1.13.0 -- zero occurrences of either name anywhere in the file. So the removal lands exactly at 1.13.0 (released April 2024), a full year after jax==0.4.7 (March 2023) was written against the old API. Same shape as the dm-haiku/jax.extend incompatibility two rounds ago: jax==0.4.7 is fixed in place by the CUDA-11.6 ceiling this project established during U1 (§3), so the fix has to pin scipy backward, not jax forward. Chose 1.12.0 specifically (not e.g. 1.11.4) as the newest release that still has tril/triu, to minimize version drift from everything else already resolved in this same install command. Verified via PyPI requires_dist before committing to the pin, not after: scipy==1.12.0 needs numpy>=1.22.4,<1.29.0 (compatible with the existing numpy>=1.23,<2 pin), and checked all five of the other newly-added packages (ml-collections, biopython, dm-tree, pandas, matplotlib) for their own scipy constraints -- none of the first three declare scipy at all, and pandas's only scipy reference lives behind its unused 'computation'/'all' extras, so tightening scipy alone cannot cascade into a new conflict. FIXED containers/rfdiffusion.def: `\"scipy\"` -> `\"scipy==1.12.0\"` in the same existing one-resolution-pass uv pip install command, with a new comment block (same location, same style as the numpy<2 explanation immediately above it) recording the AttributeError, the exact tag-by-tag source check, why the fix goes backward instead of bumping jax, and why 1.12.0 was chosen over an older release. Verified bash -n clean on the extracted %post block again. STATED PLAINLY WHAT IS NOT YET TRUE: not yet rebuilt or re-verified -- this is dependency-resolution and source-level reasoning, not a real container run; the traceback got further than any previous attempt (past ColabDesign's own __init__ and into optax's internals) but there is no guarantee this is the last gap in that import chain. Updated aidlc-state.md's Milestone M1 entry with this fourth finding."
+**Context**: CONSTRUCTION - Milestone M1 - fourth real Grex execution FAILED, but confirms the six-package ColabDesign-dependency fix; new root cause (AttributeError: scipy.linalg has no attribute tril, from jax==0.4.7's module-import-time `@_wraps(scipy.linalg.tril)` decorator against scipy 1.13.1, which removed tril/triu) found via tag-by-tag source inspection and fixed by pinning scipy==1.12.0, the newest release that still has both names; rebuild and re-verification pending
+
+---
