@@ -490,7 +490,7 @@ Workflow Planning and favours skipping optional stages.
         unit-of-work.md's 5 M1 exit criteria), and an explicit scope-limits section (this smoke
         test exercises `DesignMode.FREE` only — template resolution and AnAnaS/`symmetry=auto`
         are not exercised and remain open for a later spot-check)
-      - ⚠️ **First real execution, 2026-08-07 13:34 CDT (job 7441234, node `g325`, real V100)
+      - ⚠️ **First real execution, 2026-08-13 13:34 CDT (job 7441234, node `g325`, real V100)
         FAILED, 1-second runtime.** Everything upstream of the crash worked: GPU visible via
         `--nv`, `module load singularity`, `apptainer exec`, all bind mounts (traceback paths
         confirm `/opt/rfdgui` resolved correctly), `PYTHONPATH` found `rfd_runner`/`rfd_core` as
@@ -501,11 +501,31 @@ Workflow Planning and favours skipping optional stages.
         the U1 icecream/pyrsistent miss (§8.1f) — a package needed by an import chain that didn't
         exist when the image's dependency list was written. **Fixed**: added
         `uv pip install --python "$VPY" --no-cache "pydantic>=2.0,<3"` to `rfdiffusion.def`,
-        pinned to match rfd-core's own constraint exactly. `rfd-runner`'s own pyproject.toml
-        declares no third-party dependency beyond `rfd-core`, so no second gap is expected.
-        **Not yet rebuilt or re-verified.**
+        pinned to match rfd-core's own constraint exactly.
+      - ✅ **Rebuild (job 7441239, CPU, 17m28s) COMPLETED.** ⚠️ **Second real execution, 2026-08-13
+        14:02 CDT (job 7441266, node `g325`, real V100) FAILED, 3-second runtime** — confirms the
+        `pydantic` fix: the traceback now gets much further, past `rfd_core`'s import entirely and
+        into real business logic (`_run_backbone` → `ContigNormaliser` → the `_colabdesign.py`
+        bridge → ColabDesign's real `fix_contigs` → its AlphaFold submodule → `haiku`), proving
+        DD-2's bind-mount design and the bridge module's lazy-import seam both work against the
+        real container. **New root cause: `ModuleNotFoundError: No module named 'jax.extend'`**,
+        from `haiku/_src/dot.py` (`dm-haiku==0.0.12`), imported unconditionally by bare
+        `import haiku`. Traced via GitHub commit history (jax-ml/jax, path=jax/extend): commit
+        `ca39457ea9` ("move jax.linear_util to jax.extend.linear_util") landed 2023-08-30, just
+        after jax 0.4.15's release the same day — so `jax.extend` first exists in jax 0.4.16
+        (2023-09-19). **No jax version is both new enough to have `jax.extend` and old enough for
+        the CUDA-11.6 ceiling this project already established** (cuda11 jaxlib builds stop at
+        0.4.7; 0.4.8+ needs CUDA≥11.8) — the fix has to go the other way. Checked dm-haiku's own
+        release history: `0.0.10` (2023-07-14) predates the `jax.extend` commit itself, so it
+        cannot reference it — **confirmed by reading `haiku/_src/dot.py`'s actual source at the
+        `v0.0.10` tag**: plain `jax.linear_util`/`jax.core`/`jax.experimental.pjit`, no
+        `jax.extend` anywhere; `jax==0.4.7` still exposes `jax.linear_util` at the top level (only
+        moved, not removed, until much later). ColabDesign's `setup.py` pins no `dm-haiku` version
+        at all (re-confirmed), so no cascading conflict. **Fixed**: `dm-haiku==0.0.12` →
+        `dm-haiku==0.0.10` in `rfdiffusion.def`, comment block rewritten with the full research
+        trail. **Not yet rebuilt or re-verified.**
       - **Next action is the user's**: `bash scripts/build-image.sh` (inside a CPU `salloc`, not
-        on a login node) to rebuild with the fix, then re-run
+        on a login node) to rebuild with both fixes, then re-run
         `sbatch scripts/m1-submit.sh <run_dir>` (a fresh `run_dir` from `m1-prepare-run.sh`, or
         the existing one — `RunRecord` is idempotent to reload) and report back the
         `sacct`/job-log output again
@@ -521,9 +541,11 @@ prepared and awaiting execution on real Grex hardware.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
 - **Current Stage**: **Milestone M1 — blocked on real Grex GPU execution.** U1 + U2a + U2b are all
   code-complete and approved. This is the gate: it requires the user to run a hand-written `sbatch`
-  job on a real Grex login/GPU node, which this environment cannot do itself. **First attempt
-  (2026-08-13, job 7441234) FAILED at import** (`pydantic` missing from the image —
-  `containers/rfdiffusion.def` predates rfd-core; fixed, not yet rebuilt/re-verified).
+  job on a real Grex login/GPU node, which this environment cannot do itself. **Two attempts so
+  far, two different root causes found and fixed, neither yet re-verified**: (1, job 7441234)
+  `pydantic` missing from the image — fixed, rebuild (job 7441239) confirmed it; (2, job 7441266)
+  `dm-haiku==0.0.12` imports `jax.extend`, which cannot coexist with the CUDA-11.6-mandated
+  `jax==0.4.7` ceiling — fixed by downgrading to `dm-haiku==0.0.10`, not yet rebuilt.
 - **Completed**: U1 Code Generation and verification (2026-08-06/07, six rounds — three CPU, one
   GPU risk-materialization, one build-time resolver failure, one final GPU confirmation), U2a Core
   Domain (157 tests, 100% coverage, real Python 3.9.25), U2b Runner Functional Design and Code

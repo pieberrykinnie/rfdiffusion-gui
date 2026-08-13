@@ -721,3 +721,41 @@ ModuleNotFoundError: No module named 'pydantic'
 **Context**: CONSTRUCTION - Milestone M1 - first real Grex execution FAILED at import (ModuleNotFoundError: pydantic) -- a container/package-manifest drift, not a code defect; root-caused to DD-2/rfdiffusion.def predating rfd-core's existence; fixed by adding the missing dependency; rebuild and re-verification pending
 
 ---
+
+## Milestone M1 - Second Real Grex Execution - `pydantic` Fix Confirmed, New Failure: `jax.extend`
+**Timestamp**: 2026-08-13T19:03:00Z (approx, from job timestamps)
+**User Input**: "```
+def-cardo+     vuqh1 7441239      2026-08-13T13:41:56 2026-08-13T13:59:24  ...  COMPLETED   [CPU rebuild job, 17m28s]
+def-cardo+     vuqh1 7441266      2026-08-13T14:02:58 2026-08-13T14:03:01  ...  FAILED      [GPU node g325, 3s]
+```"
+**AI Response**: "Read the two jobs correctly before asking for logs: 7441239 (CPU, 4 cpu, no gpu, 17m28s, COMPLETED) is the image rebuild (scripts/build-image.sh inside salloc); 7441266 (GPU node g325, 3s, FAILED) is the actual M1 re-run. 3 seconds vs the previous attempt's 1 second is a small but real signal -- got slightly further -- so asked for the job log again rather than assuming the same defect recurred."
+**Context**: CONSTRUCTION - Milestone M1 - second execution attempt after the pydantic fix, still FAILED, requested job log
+
+---
+
+## Milestone M1 - Second Job Log - `pydantic` Confirmed Fixed, Root Cause 2: `ModuleNotFoundError: jax.extend`
+**Timestamp**: 2026-08-13T19:05:00Z (approx)
+**User Input**: "```
+[nvidia-smi: real V100, same as before]
+Job finished with exit code 1 at: Thu Aug 13 14:03:01 CDT 2026
+Traceback (most recent call last):
+  ...
+  File \"/opt/rfdgui/packages/rfd-runner/src/rfd_runner/orchestrator.py\", line 148, in _run_backbone
+    normalised_contigs = deps.contig_normaliser.normalise_contigs(
+  ...
+  File \"/opt/rfdgui/packages/rfd-runner/src/rfd_runner/_colabdesign.py\", line 41, in fix_contigs
+    from colabdesign.rf.utils import fix_contigs as _fix_contigs
+  ...
+  File \".../colabdesign/af/alphafold/model/utils.py\", line 23, in <module>
+    import haiku as hk
+  File \".../haiku/__init__.py\", line 20, in <module>
+    from haiku import experimental
+  ...
+  File \".../haiku/_src/dot.py\", line 29, in <module>
+    from jax.extend import linear_util as lu
+ModuleNotFoundError: No module named 'jax.extend'
+```"
+**AI Response**: "Confirmed the pydantic fix worked completely -- the traceback got dramatically further this time: past rfd_core's own import, into the actual business logic (_run_backbone -> contig_normaliser -> the _colabdesign.py bridge -> ColabDesign's real fix_contigs -> its AlphaFold submodule -> haiku), proving DD-2's bind-mount architecture and the bridge module's lazy-import design both work exactly as intended against the real container. New, different, single-cause failure: haiku 0.0.12's own `_src/dot.py`, imported unconditionally by bare `import haiku` (via `haiku/experimental/__init__.py`, which `haiku/__init__.py` imports at module load with no lazy gate), does `from jax.extend import linear_util as lu`. RESEARCHED FROM PRIMARY SOURCES rather than guessing a version bump, continuing this project's established method: used GitHub's commits API against jax-ml/jax filtered to path=jax/extend to find the exact commit that created jax.extend.linear_util -- ca39457ea9, \"JEX: move jax.linear_util to jax.extend.linear_util\", 2023-08-30T22:14:47Z. Cross-checked against jax's own PyPI release timestamps: jax 0.4.15 uploaded 2023-08-30T20:00:44Z, ~2 hours BEFORE that commit landed, so 0.4.15 does not have it; 0.4.16 (2023-09-19) is the first release that could. CONCLUSION: jax.extend does not exist in any jax release compatible with the CUDA-11.6 ceiling this project already established (jaxlib cuda11 builds stop at 0.4.7; 0.4.8+ requires CUDA>=11.8) -- there is no jax version that is simultaneously new enough to have jax.extend.linear_util and old enough to run on this base image. The fix cannot be 'bump jax'; it has to go the other way, to a dm-haiku release whose OWN source predates jax.extend. Fetched dm-haiku's PyPI release history: checked 0.0.9 (2022-11-16, requires jax==0.3.16 under its [jax] extra -- too large an API gap from 0.4.7 to trust) and 0.0.10 (2023-07-14, requires jax>=0.4.13 under its [jax] extra, not enforced since that extra is not requested here) -- 0.0.10 was released BEFORE the jax.extend commit even landed (2023-07-14 vs 2023-08-30), so it cannot possibly reference a module that did not exist yet. VERIFIED, NOT INFERRED FROM DATES ALONE: fetched haiku/_src/dot.py's actual source at the v0.0.10 git tag and read its import block directly -- `import jax`, `import jax.core`, `from jax.experimental import pjit`, and jax.linear_util/jax.tree_util/jax.api_util accessed as plain attributes of the `jax` module, no `jax.extend` import anywhere. jax==0.4.7 still exposes `jax.linear_util` at the top level (the move only relocated it into jax.extend; deprecation of the old top-level path did not happen until much later per jax's own changelog), so this import resolves cleanly. Also fetched ColabDesign's setup.py at the pinned commit again, specifically for a dm-haiku constraint -- confirmed (as already known from the earlier chex/optax investigation) it pins no version for dm-haiku at all, so no ColabDesign-side objection to downgrading. FIXED containers/rfdiffusion.def: dm-haiku==0.0.12 -> dm-haiku==0.0.10, with the existing comment block rewritten in place (not just the version number silently changed) to record the ModuleNotFoundError, the exact commit/version research trail, why no jax bump is possible, and why 0.0.10 specifically was chosen over 0.0.9 (closer declared jax floor, smaller API gap from 0.4.7) -- following this project's established pattern of leaving the reasoning inspectable, not just the conclusion. Verified bash -n clean on the extracted %post block again. STATED PLAINLY WHAT IS NOT YET TRUE: not yet rebuilt or re-verified -- flagged explicitly in the def file's own comment, not just the audit log, so a future reader mid-build knows this is reasoned-but-unconfirmed. Updated aidlc-state.md's Milestone M1 entry with this second finding, distinct from and building on the first (pydantic) one rather than overwriting it."
+**Context**: CONSTRUCTION - Milestone M1 - second real Grex execution FAILED, but confirms the pydantic fix; new root cause found (ModuleNotFoundError: jax.extend, from dm-haiku 0.0.12's dot.py, incompatible with the CUDA-11.6-mandated jax==0.4.7 ceiling) via GitHub commit history + PyPI release history + direct source read at the dm-haiku v0.0.10 tag; fixed by downgrading dm-haiku to 0.0.10; rebuild and re-verification pending
+
+---

@@ -189,17 +189,43 @@ From: rosettacommons/rfdiffusion
     #             pass" exists to do). optax 0.1.7 (2023-07-26, contemporary
     #             with chex 0.1.82) requires only chex>=0.1.5 and jax>=0.1.55
     #             -- pinned here instead.
-    #   dm-haiku -- 0.0.12's OWN jax constraint lives entirely under its
-    #             optional [jax] extra, which this install does not request.
-    #             Its unconditional `flax>=0.7.1` dependency was checked too:
-    #             flax 0.7.1 requires only jax>=0.4.2, so no conflict; no
-    #             change needed to the dm-haiku pin itself.
+    #   dm-haiku -- ORIGINALLY 0.0.12, changed to 0.0.10 after Milestone M1's
+    #             first real GPU execution (2026-08-13) hit a live
+    #             ModuleNotFoundError, past pip resolution entirely -- pip's
+    #             version bounds are necessary, not sufficient, exactly the
+    #             lesson from the jaxlib wheel-tag saga above applied to a
+    #             different failure mode. `haiku/_src/dot.py` (imported
+    #             unconditionally by `import haiku`, via
+    #             `haiku/experimental/__init__.py`) does
+    #             `from jax.extend import linear_util as lu` in 0.0.12. The
+    #             `jax.extend` namespace ITSELF did not exist until jax
+    #             0.4.16 (traced via GitHub commit ca39457ea9, "move
+    #             jax.linear_util to jax.extend.linear_util", landing
+    #             2023-08-30, just after the 0.4.15 release) -- jax==0.4.7 is
+    #             months too old to have it, and cannot be bumped without
+    #             breaking the CUDA-11.6-vs-11.8 ceiling this file already
+    #             documents above. So no dm-haiku release contemporary with
+    #             jax>=0.4.16 can work here; the fix has to go the other way.
+    #             Fetched haiku's own release history: 0.0.10 (2023-07-14)
+    #             predates the jax.extend commit itself, so its dot.py cannot
+    #             reference it -- confirmed by reading
+    #             haiku/_src/dot.py at the v0.0.10 tag directly, which uses
+    #             the plain `jax.linear_util` attribute (still present on
+    #             jax==0.4.7; the module was only MOVED to jax.extend, not
+    #             removed from top-level jax until much later). 0.0.10's own
+    #             optional [jax] extra wants jax>=0.4.13 (not enforced here --
+    #             this install does not request that extra) and it declares
+    #             no unconditional flax dependency (only 0.0.11+ do), so no
+    #             cascading conflict. ColabDesign's own setup.py pins no
+    #             dm-haiku version at all (--no-deps below anyway). NOT YET
+    #             RE-VERIFIED on GPU -- the next real Grex run is what
+    #             confirms this, not this reasoning alone.
     uv pip install --python "$VPY" --no-cache \
         "jax==0.4.7" \
         "jaxlib==0.4.7+cuda11.cudnn86" \
         "opt_einsum_fx" \
         "py3Dmol" "joblib" "immutabledict" \
-        "chex==0.1.82" "optax==0.1.7" "dm-haiku==0.0.12" \
+        "chex==0.1.82" "optax==0.1.7" "dm-haiku==0.0.10" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
     # ColabDesign last, with --no-deps, so it cannot perturb the set above.
