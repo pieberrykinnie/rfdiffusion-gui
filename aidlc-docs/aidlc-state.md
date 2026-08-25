@@ -612,13 +612,43 @@ Workflow Planning and favours skipping optional stages.
         for the `dump_pdb` keys check immediately above it). Verified the extracted `%post` block
         is still syntactically valid bash (`bash -n`) after the edit. **Not yet rebuilt or
         re-verified.**
+      - ✅ **Rebuild confirmed** — **Sixth real execution (job on `g325`) BACKBONE STAGE PASSED**,
+        the first time any stage has completed on real Grex hardware (`backbone_state: "completed"`,
+        real `.pdb`/trajectory outputs written). ⚠️ **VALIDATE stage FAILED** (`validate_state:
+        "failed"`) — a new failure mode again confirmed via `run.json`'s `error` field (not the
+        `.err` file, per the 5th-round finding): `jaxlib.xla_extension.XlaRuntimeError:
+        FAILED_PRECONDITION: Couldn't get ptxas/nvlink version string: INTERNAL: Couldn't invoke
+        ptxas --version`, raised from ColabDesign's AlphaFold model
+        (`colabdesign/af/alphafold/model/utils.py`'s `flat_params_to_haiku`) — the first code path
+        in this whole pipeline that makes jax actually **compile and execute** an XLA op on GPU
+        (BACKBONE is pure torch/RFdiffusion; jax is otherwise only imported, never compiled
+        against). **Root-caused via source, not guessed**: fetched `jax/_src/lib/__init__.py` at
+        the pinned `jax-v0.4.7` tag — its `_cuda_path()` looks first for a sibling
+        `nvidia/cuda_nvcc` site-packages directory (the pip package `nvidia-cuda-nvcc-cu11`,
+        which ships `bin/ptxas` + `nvvm/libdevice`), and otherwise "hope[s] the user has ptxas in
+        their PATH" (its own comment) — this project never installed that package, and the base
+        image (a torch/RFdiffusion runtime image, not a CUDA devel toolchain) has no system
+        `ptxas` either. **Fixed**: added `nvidia-cuda-nvcc-cu11==11.7.99` to the same
+        one-resolution-pass `uv pip install` command in `containers/rfdiffusion.def` (no exact
+        11.6.x build exists on PyPI — checked, only 11.7.99/11.8.89 published for cu11; 11.7.99 is
+        safe via CUDA's PTX forward-compatibility guarantee within the 11.x line, and the
+        installed driver, 580.173.02/CUDA 13.0, is far newer than ptxas 11.7's ~515.x minimum).
+        Verified via PyPI `requires_dist` that the package declares no runtime dependencies of its
+        own — no cascading conflict. Added a build-time `test -x .../nvidia/cuda_nvcc/bin/ptxas`
+        guard (same "fail the BUILD" pattern used throughout this file). **Also closed the
+        verification gap that let this reach a real GPU job undetected**: `scripts/verify-image.sh`
+        check 4 only ever called `jax.devices()`, which reports a CUDA device without invoking
+        XLA's compiler — it could never have caught a missing-`ptxas` failure. Strengthened it to
+        actually compile and run a real `jnp` op (`.block_until_ready()`) and assert success, so
+        this class of gap fails at `verify-image.sh` time going forward, not deep into a real M1
+        job. **Not yet rebuilt or re-verified.**
       - **Next action is the user's**: `bash scripts/build-image.sh --force` (inside a CPU
-        `salloc`, not on a login node — the image already exists, so `--force` is required this
-        time) to rebuild with the `weights_only` patch, then re-run
-        `sbatch scripts/m1-submit.sh <run_dir>` (a fresh `run_dir` from `m1-prepare-run.sh`, or
-        the existing one — `RunRecord` is idempotent to reload) and report back the `sacct`/job-log
-        output, **and if it fails again with a clean exit code and empty `.err`, check `run.json`
-        in the run directory first** — that failure mode is now expected behavior, not a bug.
+        `salloc`) to rebuild with the `nvidia-cuda-nvcc-cu11` fix, then
+        `bash scripts/verify-image.sh` (GPU allocation) to confirm check 4 now passes its new
+        real-compile assertion, then re-run `sbatch scripts/m1-submit.sh <run_dir>` (a fresh
+        `run_dir`, or the existing one — `RunRecord` is idempotent, and `backbone_state` is already
+        `completed` so a re-run should proceed straight to VALIDATE) and report back — checking
+        `run.json` first if `.err` is empty again, per the 5th-round finding.
 - [ ] U3 Slurm Integration and Persistence: Functional Design **EXECUTE** → Code Generation **EXECUTE**
       (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
 - [ ] U4 Web Application: Code Generation **EXECUTE**

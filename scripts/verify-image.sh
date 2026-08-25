@@ -100,13 +100,25 @@ else
 fi
 
 # ------------------------------------------------------------ 4. THE JAX RISK
-sect "4. JAX imports and sees the GPU (known CUDA-11 risk)"
+sect "4. JAX imports, sees the GPU, and can actually compile/run on it (known CUDA-11 risk)"
+# M1 6th-round finding: `jax.devices()` alone is NOT enough -- it reports a
+# CudaDevice without ever invoking XLA's GPU compiler. The VALIDATE stage
+# (ColabDesign's AlphaFold model) is the first real code path that compiles
+# an XLA op on GPU, and it failed on a real M1 run with:
+#   XlaRuntimeError: FAILED_PRECONDITION: Couldn't get ptxas/nvlink version
+#   string: INTERNAL: Couldn't invoke ptxas --version
+# This is exactly the class of failure a devices()-only check cannot catch,
+# so this check now forces a real compile+execute (see
+# containers/rfdiffusion.def's nvidia-cuda-nvcc-cu11 fix for the root cause).
 OUT=$($RUN $VPY -c "
 import jax
+import jax.numpy as jnp
 from importlib.metadata import version
 print('jax', jax.__version__)
 print('jaxlib', version('jaxlib'))
 print('devices', jax.devices())
+result = (jnp.asarray([1.0, 2.0, 3.0]) + 1.0).block_until_ready()
+print('compile_ok', result)
 " 2>&1)
 printf '%s\n' "$OUT" | sed 's/^/    /'
 if printf '%s' "$OUT" | grep -q '^jax '; then
@@ -128,6 +140,13 @@ if printf '%s' "$OUT" | grep -q '^jax '; then
   else
     bad "JAX imports but reports no GPU (CPU fallback would be very slow).
            See the fallback ladder in containers/rfdiffusion.def %post."
+  fi
+  if printf '%s' "$OUT" | grep -q '^compile_ok'; then
+    ok "JAX compiles and runs a real XLA op on GPU (exercises ptxas)"
+  else
+    bad "JAX sees a GPU device but cannot compile/run an XLA op on it -- likely
+           missing ptxas (nvidia-cuda-nvcc-cu11). See containers/rfdiffusion.def
+           %post's nvidia-cuda-nvcc-cu11 comment block."
   fi
 else
   bad "JAX failed to import -- this is the anticipated CUDA-11 risk.

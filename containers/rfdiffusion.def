@@ -299,14 +299,55 @@ From: rosettacommons/rfdiffusion
     # declare a scipy dependency at all, and pandas's only scipy reference
     # is behind its unused "computation"/"all" extras -- no cascading
     # conflict from tightening this one package.
+    # M1 6th-round finding: the VALIDATE stage (ColabDesign's AlphaFold model,
+    # via colabdesign/af/alphafold/model/utils.py's flat_params_to_haiku) is
+    # the first code path in this whole pipeline that makes jax actually
+    # compile and run an XLA computation on GPU (BACKBONE is pure torch/
+    # RFdiffusion; the earlier PASS-13 GPU run only checked jax.devices()
+    # reports a GPU, never compiled anything). It failed with:
+    #   jaxlib.xla_extension.XlaRuntimeError: FAILED_PRECONDITION: Couldn't
+    #   get ptxas/nvlink version string: INTERNAL: Couldn't invoke ptxas
+    #   --version
+    # Root-caused via source, not guessed: fetched jax/_src/lib/__init__.py
+    # at the pinned jax-v0.4.7 tag -- its _cuda_path() looks first for a
+    # sibling "nvidia/cuda_nvcc" directory (i.e. the pip package
+    # nvidia-cuda-nvcc-cu11, which ships bin/ptxas + nvvm/libdevice), and
+    # only if that is absent falls back to jaxlib's own bundled libdevice
+    # "and hope[s] the user has ptxas in their PATH" (its own comment) --
+    # this project never installed that package, and the base image (a
+    # torch/RFdiffusion runtime image, not a CUDA devel toolchain) has no
+    # system ptxas either, so both paths came up empty. Fixed the same way
+    # the cuDNN gap was fixed above: install the pip-redistributed CUDA
+    # component jax's own source says it looks for, in this SAME
+    # one-resolution-pass command (no separate later call, same principle
+    # as the numpy/scipy pins above -- a later call could silently upgrade
+    # something already resolved). No exact 11.6.x build exists on PyPI
+    # (checked: only 11.7.99 and 11.8.89 are published for cu11) -- chose
+    # 11.7.99, the closest to this base image's CUDA 11.6.2 runtime. Safe
+    # despite the version gap: CUDA's PTX compatibility guarantee is that a
+    # newer-toolkit ptxas can always assemble PTX emitted by an
+    # older-toolkit's compiler within the same CUDA major version (11.x),
+    # and the installed driver (580.173.02, CUDA 13.0 per nvidia-smi) is far
+    # newer than the ~515.x minimum ptxas 11.7 needs -- no driver-side risk
+    # either. Verified via PyPI requires_dist that nvidia-cuda-nvcc-cu11
+    # declares no runtime dependencies of its own (only setuptools/wheel,
+    # both build-time) -- no cascading conflict with numpy/scipy/jax above.
     uv pip install --python "$VPY" --no-cache \
         "jax==0.4.7" \
         "jaxlib==0.4.7+cuda11.cudnn86" \
+        "nvidia-cuda-nvcc-cu11==11.7.99" \
         "opt_einsum_fx" \
         "py3Dmol" "joblib" "immutabledict" \
         "chex==0.1.82" "optax==0.1.7" "dm-haiku==0.0.10" \
         "numpy>=1.23,<2" "ml-collections" "biopython" "dm-tree" "pandas" "scipy==1.12.0" "matplotlib" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+    # Fail the BUILD, not a job three hours from now, if nvidia-cuda-nvcc-cu11
+    # ever changes its package layout so jax's _cuda_path() can no longer find
+    # it (same pattern as the dump_pdb keys check and the jaxlib CUDA-build
+    # guard elsewhere in this file).
+    test -x "${VENV}/lib/python3.9/site-packages/nvidia/cuda_nvcc/bin/ptxas" || \
+      { echo "FATAL: nvidia-cuda-nvcc-cu11 installed but bin/ptxas not found where jax's _cuda_path() expects it"; exit 1; }
 
     # ColabDesign last, with --no-deps, so it cannot perturb the set above.
     CD_SHA=e31a56fe1d9b4de25c8697f3a28b75892941cc72
