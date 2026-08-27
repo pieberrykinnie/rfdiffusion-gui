@@ -25,9 +25,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting up RFdiffusion Web UI")
     layout: PathLayout = app.state.layout
+    repository: RunRepository = app.state.repository
     
     # Reconcile index
-    reconciler = RunIndexReconciler(layout)
+    reconciler = RunIndexReconciler(layout, repository)
     reconciler.reconcile_all()
     
     # Initialize PartitionCache
@@ -94,6 +95,7 @@ def create_app(
     app.state.config = config
     app.state.slurm = slurm
     app.state.layout = layout
+    app.state.repository = repository
     app.state.query_service = query_service
     app.state.submission_service = submission_service
     app.state.result_service = result_service
