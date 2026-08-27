@@ -34,13 +34,16 @@ def get_best_overlay(id: str, request: Request):
 @router.get("/runs/{id}/download")
 def download_results(id: str, request: Request):
     service = request.app.state.result_service
+    query_service = request.app.state.query_service
+    run = query_service.get(id)
+    filename = f"{run.name}.result.zip" if run and run.name else f"{id}.result.zip"
     path = service.get_result_zip(id)
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail="Result archive not found")
     return FileResponse(
         path,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{id}.result.zip"'}
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
 @router.get("/runs/{id}/file/{path:path}")
