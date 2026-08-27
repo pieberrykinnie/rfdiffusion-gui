@@ -3,12 +3,24 @@ class PDBViewer {
         this.container = document.getElementById(containerId);
         if (this.container && window.$3Dmol) {
             this.viewer = $3Dmol.createViewer(this.container, {
-                backgroundColor: 'black'
+                backgroundColor: '#0b0f19'
             });
         }
-        this.currentTrajectory = null;
         this.isPlaying = false;
-        this.animationInterval = null;
+    }
+
+    setStatus(text, visible = true) {
+        let el = document.getElementById('viewer-status-text');
+        if (!el && this.container) {
+            el = document.createElement('div');
+            el.id = 'viewer-status-text';
+            el.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#94a3b8;font-size:0.9rem;text-align:center;pointer-events:none;z-index:5;background:rgba(15,23,42,0.8);padding:0.5rem 1rem;border-radius:6px;border:1px solid rgba(255,255,255,0.1);';
+            this.container.appendChild(el);
+        }
+        if (el) {
+            el.innerText = text;
+            el.style.display = visible ? 'block' : 'none';
+        }
     }
 
     async fetchPDB(url) {
@@ -17,34 +29,24 @@ class PDBViewer {
         return await response.text();
     }
 
-    async loadFrame(url) {
+    async loadStructure(url, scheme = 'spectrum') {
         if (!this.viewer) return;
+        this.setStatus('Loading 3D Structure...', true);
         try {
             const pdbData = await this.fetchPDB(url);
-            this.viewer.clear();
-            this.viewer.addModel(pdbData, "pdb");
-            this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}});
-            this.viewer.zoomTo();
-            this.viewer.render();
-        } catch (error) {
-            console.error("Error loading live frame:", error);
-        }
-    }
-
-    async loadStructure(url, scheme = 'rainbow') {
-        if (!this.viewer) return;
-        try {
-            const pdbData = await this.fetchPDB(url);
+            if (!pdbData || (!pdbData.includes('ATOM') && !pdbData.includes('HETATM'))) {
+                this.setStatus('No valid PDB coordinates found', true);
+                return;
+            }
             this.viewer.clear();
             this.viewer.addModel(pdbData, "pdb");
             
             let style = {};
-            if (scheme === 'rainbow') {
+            if (scheme === 'spectrum' || scheme === 'rainbow') {
                 style = {cartoon: {color: 'spectrum'}};
             } else if (scheme === 'chain') {
                 style = {cartoon: {colorscheme: 'chain'}};
             } else if (scheme === 'plddt') {
-                // b-factor coloring for plddt
                 style = {cartoon: {
                     colorfunc: (atom) => {
                         const b = atom.b;
@@ -58,41 +60,66 @@ class PDBViewer {
             
             this.viewer.setStyle({}, style);
             this.viewer.zoomTo();
+            this.viewer.resize();
             this.viewer.render();
+            this.setStatus('', false);
         } catch (error) {
-            console.error("Error loading structure:", error);
+            console.warn("Could not load PDB structure:", error);
+            this.setStatus('No 3D structure available for this run', true);
+        }
+    }
+
+    async loadFrame(url) {
+        if (!this.viewer) return;
+        try {
+            const pdbData = await this.fetchPDB(url);
+            if (!pdbData || (!pdbData.includes('ATOM') && !pdbData.includes('HETATM'))) return;
+            this.viewer.clear();
+            this.viewer.addModel(pdbData, "pdb");
+            this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}});
+            this.viewer.zoomTo();
+            this.viewer.resize();
+            this.viewer.render();
+            this.setStatus('', false);
+        } catch (error) {
+            this.setStatus('Waiting for live denoising frame...', true);
         }
     }
 
     async loadTrajectory(url) {
         if (!this.viewer) return;
+        this.setStatus('Loading Trajectory...', true);
         try {
             const pdbData = await this.fetchPDB(url);
             this.viewer.clear();
             this.viewer.addModelsAsFrames(pdbData, "pdb");
             this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}});
             this.viewer.zoomTo();
-            this.viewer.animate({loop: "forward", step: 1});
+            this.viewer.resize();
+            this.viewer.animate({loop: "backAndForth", step: 1});
+            this.setStatus('', false);
         } catch (error) {
-            console.error("Error loading trajectory:", error);
+            console.warn("Error loading trajectory:", error);
+            this.setStatus('Trajectory file not available', true);
         }
     }
     
     async loadBestOverlay(url) {
         if (!this.viewer) return;
+        this.setStatus('Loading Overlay...', true);
         try {
             const pdbData = await this.fetchPDB(url);
             this.viewer.clear();
             this.viewer.addModelsAsFrames(pdbData, "pdb");
-            
-            // Set style for model 0 (backbone) and model 1 (design)
             this.viewer.setStyle({model: 0}, {cartoon: {color: 'gray'}});
-            this.viewer.setStyle({model: 1}, {cartoon: {color: 'spectrum'}});
-            
+            this.viewer.setStyle({model: 1}, {cartoon: {colorscheme: {prop: 'b', gradient: 'roygb', min: 50, max: 90}}});
             this.viewer.zoomTo();
+            this.viewer.resize();
             this.viewer.render();
+            this.setStatus('', false);
         } catch (error) {
-            console.error("Error loading overlay:", error);
+            console.warn("Error loading overlay:", error);
+            this.setStatus('Overlay file not available', true);
         }
     }
 
@@ -128,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
         designSelector.addEventListener('change', (e) => {
             const url = e.target.value;
             if (url && window.pdbViewer) {
-                const scheme = document.getElementById('color-scheme')?.value || 'rainbow';
+                const scheme = document.getElementById('color-scheme')?.value || 'spectrum';
                 window.pdbViewer.loadStructure(url, scheme);
             }
         });

@@ -61,6 +61,8 @@ def get_run_frame(id: str, request: Request):
     service = request.app.state.result_service
     path = service.get_file(id, "current_frame.pdb")
     if not path or not path.exists():
+        path = service.get_structure(id, 0)
+    if not path or not path.exists():
         raise HTTPException(status_code=404, detail="Frame not found")
     return FileResponse(path, media_type="text/plain")
 
