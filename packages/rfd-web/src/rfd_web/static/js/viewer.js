@@ -5,6 +5,12 @@ class PDBViewer {
             this.viewer = $3Dmol.createViewer(this.container, {
                 backgroundColor: '#0b0f19'
             });
+            window.addEventListener('resize', () => {
+                if (this.viewer) {
+                    this.viewer.resize();
+                    this.viewer.render();
+                }
+            });
         }
         this.isPlaying = false;
     }
@@ -43,7 +49,7 @@ class PDBViewer {
             
             let style = {};
             if (scheme === 'spectrum' || scheme === 'rainbow') {
-                style = {cartoon: {color: 'spectrum'}, stick: {radius: 0.15, color: 'spectrum'}};
+                style = {cartoon: {color: 'spectrum'}, stick: {radius: 0.15, colorscheme: 'chain'}};
             } else if (scheme === 'chain') {
                 style = {cartoon: {colorscheme: 'chain'}, stick: {radius: 0.15, colorscheme: 'chain'}};
             } else if (scheme === 'plddt') {
@@ -58,8 +64,8 @@ class PDBViewer {
             }
             
             this.viewer.setStyle({}, style);
-            this.viewer.zoomTo();
             this.viewer.resize();
+            this.viewer.zoomTo();
             this.viewer.render();
             this.setStatus('', false);
         } catch (error) {
@@ -75,9 +81,9 @@ class PDBViewer {
             if (!pdbData || (!pdbData.includes('ATOM') && !pdbData.includes('HETATM'))) return;
             this.viewer.clear();
             this.viewer.addModel(pdbData, "pdb");
-            this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}, stick: {radius: 0.15, color: 'spectrum'}});
-            this.viewer.zoomTo();
+            this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}, stick: {radius: 0.15, colorscheme: 'chain'}});
             this.viewer.resize();
+            this.viewer.zoomTo();
             this.viewer.render();
             this.setStatus('', false);
         } catch (error) {
@@ -92,9 +98,9 @@ class PDBViewer {
             const pdbData = await this.fetchPDB(url);
             this.viewer.clear();
             this.viewer.addModelsAsFrames(pdbData, "pdb");
-            this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}, stick: {radius: 0.15, color: 'spectrum'}});
-            this.viewer.zoomTo();
+            this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}, stick: {radius: 0.15, colorscheme: 'chain'}});
             this.viewer.resize();
+            this.viewer.zoomTo();
             this.viewer.animate({loop: "backAndForth", step: 1});
             this.setStatus('', false);
         } catch (error) {
@@ -111,9 +117,9 @@ class PDBViewer {
             this.viewer.clear();
             this.viewer.addModelsAsFrames(pdbData, "pdb");
             this.viewer.setStyle({model: 0}, {cartoon: {color: 'gray'}, stick: {radius: 0.12, color: 'gray'}});
-            this.viewer.setStyle({model: 1}, {cartoon: {color: 'spectrum'}, stick: {radius: 0.15, color: 'spectrum'}});
-            this.viewer.zoomTo();
+            this.viewer.setStyle({model: 1}, {cartoon: {color: 'spectrum'}, stick: {radius: 0.15, colorscheme: 'chain'}});
             this.viewer.resize();
+            this.viewer.zoomTo();
             this.viewer.render();
             this.setStatus('', false);
         } catch (error) {

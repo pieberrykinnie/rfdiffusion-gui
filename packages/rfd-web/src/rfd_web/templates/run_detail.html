@@ -80,8 +80,8 @@
             <span style="font-size: 0.75rem; color: var(--accent-blue); font-weight: 600;">3Dmol.js</span>
         </div>
         
-        <div class="viewer-container">
-            <div id="3dmol-viewer" data-testid="viewer-container"></div>
+        <div class="viewer-container" style="min-height: 420px; position: relative;">
+            <div id="3dmol-viewer" data-testid="viewer-container" style="width: 100%; height: 420px; position: relative;"></div>
         </div>
 
         <div style="padding: 1rem; background: var(--bg-surface); border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.75rem;">
@@ -116,8 +116,8 @@
 <script>
 document.addEventListener("DOMContentLoaded", function() {
     function loadInitialStructure() {
-        if (!window.pdbViewer) {
-            setTimeout(loadInitialStructure, 200);
+        if (!window.pdbViewer || !window.pdbViewer.viewer) {
+            setTimeout(loadInitialStructure, 100);
             return;
         }
         {% if has_structure %}
@@ -126,7 +126,7 @@ document.addEventListener("DOMContentLoaded", function() {
         window.pdbViewer.loadFrame('/runs/{{ run.run_id }}/frame');
         {% endif %}
     }
-    loadInitialStructure();
+    setTimeout(loadInitialStructure, 150);
 });
 </script>
 {% endblock %}
