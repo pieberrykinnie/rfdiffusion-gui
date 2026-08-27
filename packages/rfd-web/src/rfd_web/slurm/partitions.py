@@ -36,6 +36,10 @@ class PartitionInfo:
     compatible: bool = True
     incompatible_reason: Optional[str] = None
 
+    @property
+    def is_compatible(self) -> bool:
+        return self.compatible
+
 
 #: Why a partition may be marked incompatible. Phrased as an image property, since
 #: that is what it is -- env.example records the verified hardware behind the default:

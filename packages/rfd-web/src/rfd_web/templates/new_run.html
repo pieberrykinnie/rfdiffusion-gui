@@ -127,7 +127,7 @@
             <label for="slurm_partition">Partition</label>
             <select id="slurm_partition" name="slurm_partition" data-testid="select-slurm-partition">
                 {% for partition in partitions %}
-                    <option value="{{ partition.name }}">{{ partition.name }}{% if not partition.is_compatible %} (Incompatible){% endif %}</option>
+                    <option value="{{ partition.name }}">{{ partition.name }}{% if not partition.compatible %} (Incompatible){% endif %}</option>
                 {% endfor %}
             </select>
         </div>
