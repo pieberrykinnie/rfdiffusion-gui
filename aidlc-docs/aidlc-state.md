@@ -5,8 +5,19 @@
 - **Project Type**: Brownfield
 - **Start Date**: 2026-07-30T22:57:31Z
 - **Current Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: **U3 Slurm and Persistence — Code Generation COMPLETE 2026-08-27, awaiting
-  user approval.** Functional Design approved, the 20-step code-generation plan approved, and all
+- **Current Stage**: **U3 Slurm and Persistence — Code Generation APPROVED 2026-08-27
+  ("Approve and Park"). WORKFLOW PARKED at the U3/U4 boundary by user request.** U3 is
+  complete and verified on real Grex hardware. **U4 Web Application (Code Generation only)
+  is the next stage and has NOT been started.** To resume: begin U4 Code Generation Part 1
+  (planning), per the execution plan. U3's Code Generation was verified before approval: U3's definition of done from
+  unit-of-work.md — *"a run can be submitted, tracked to completion, and cancelled
+  programmatically"* — is met against **real Slurm**, not merely against the fake the
+  definition asks for: `scripts/u3-verify.py` phase 1 (34 PASS / 1 WARN / 0 FAIL,
+  real `sinfo`/`squeue`/`sacct`), phase 2 (**job 7556197 submitted from a GENERATED job
+  script, ran, and completed** — queued 15 s, elapsed ~1m45s, full output set), and
+  phase 3 (job 7556200 cancelled and correctly reported as cancelled, attributed to the
+  app, with the runner's misleading walltime sentence suppressed per BR-8). See
+  `docs/u3-verification.md`. Functional Design approved, the 20-step code-generation plan approved, and all
   43 plan checkboxes ticked. `packages/rfd-web` now exists: **225 tests, 96% coverage, on real
   Python 3.9.25**, with the pre-existing 231 (`rfd-core` 157 + `rfd-runner` 74) re-run and
   unchanged — **456 total**. Summary at
@@ -677,9 +688,54 @@ Workflow Planning and favours skipping optional stages.
         `run_dir`, or the existing one — `RunRecord` is idempotent, and `backbone_state` is already
         `completed` so a re-run should proceed straight to VALIDATE) and report back — checking
         `run.json` first if `.err` is empty again, per the 5th-round finding.
-- [ ] U3 Slurm Integration and Persistence: Functional Design **DONE** → Code Generation **DONE**
-      2026-08-27 (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
-      — *awaiting user approval of Code Generation*
+- [x] U3 Slurm Integration and Persistence: Functional Design **DONE** → Code Generation **DONE**
+      and **APPROVED 2026-08-27** ("Approve and Park")
+      (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
+      - **✅ VERIFIED ON REAL GREX HARDWARE 2026-08-27** via `scripts/u3-verify.py`
+        (+ `docs/u3-verification.md`), in three phases:
+        **Phase 1 read-only, 34 PASS / 1 WARN / 0 FAIL** — real `sinfo` parsed (nine GPU
+        partitions: `gpu`, `agpu`, `lgpu`, `livi`, `livi-b`, `mcordgpu`, `mcordgpu-b`,
+        `stamps`, `stamps-b`; `gpu` correctly default, `lgpu` correctly annotated
+        image-incompatible — and **more partitions than `env.example` documents**, which is
+        exactly why FR-6a forbids a hard-coded list); real `squeue`→`sacct` fallback parsed
+        job 7556085 as `COMPLETED exit_code=0 signal=0`; an unknown job id returned
+        `UNKNOWN(known=False)` rather than raising, so BR-4 holds against the real client;
+        `log_tail` surfaced the actual causes of the failed M1 rounds (FR-19 real, not
+        theoretical); 11 existing run directories reconciled with none skipped or
+        mis-flagged.
+        **Phase 2 real submission, 6 PASS / 0 FAIL — the gate**: job **7556197** was
+        submitted from a job script this code **generated**, not one written by hand, and
+        completed. Queued 15 s, elapsed ~1m45s; tracked `PENDING → RUNNING → COMPLETED`
+        with live step progress (0 → 42 → 49 of 50) and `current_frame.pdb` published
+        during the run, so FR-16 and FR-17 are confirmed at the data level; outputs
+        included both trajectories, `best.pdb`, `best_design.pdb` and the result zip;
+        BR-2 held (reported `completed` because Slurm said `COMPLETED` **and** `run.json`
+        was finalised) and BR-3 held (re-reading issued zero further Slurm calls).
+        **Phase 3 cancellation, 5 PASS / 0 FAIL**: job 7556200 cancelled and reported as
+        **cancelled**, attributed *"cancelled from this app"*, with the runner's misleading
+        *"likely walltime exceeded"* sentence suppressed (BR-8); a second `cancel()` was
+        not an error (BR-11).
+      - **Three defects found by reading the real phase-1 output rather than stopping at
+        "0 FAIL"**, all fixed with regression tests (suite 225 → 228): `log_tail` could
+        return a partial first line after a truncated read; runs recovered by startup
+        reconciliation displayed `slurm=UNKNOWN` when no query had been made at all (now
+        `None` — absence of knowledge is not a state word); and the verification script's
+        own `sacct` cross-check silently did nothing, reporting PASS while proving
+        nothing, because no M1 run directory carries a `slurm_job_id` (only S-1 writes
+        one) — it now WARNs loudly. **Correction recorded**: the partial-first-line fix
+        was prompted by a `nt call last):` fragment that persisted after the fix, so that
+        particular fragment is not the byte seek and appears to be in the file on disk;
+        the fix remains correct for the case it names.
+      - **Still not exercised by a real run**: BR-5's frozen-progress path (validation
+        finished inside the 120 s staleness window, so *"validating (no step-level progress
+        available)"* never appeared — covered by unit tests only); `resubmit()` /
+        `--stage validate` (FR-11); and M1's standing scope limits (`DesignMode.FIXED`/
+        `PARTIAL`, AnAnaS / `symmetry=auto`).
+      - **U4 note**: eight M1 run directories report as permanently `queued` — their
+        hand-made `run.json` has `backbone_state: pending` and no job id, which the
+        reconciliation rules render correctly but which will sit in U4's run list forever.
+        Not a U3 defect (every run U3 submits records its job id before indexing). Options
+        recorded in `docs/u3-verification.md`.
       - **Code Generation COMPLETE 2026-08-27** — `packages/rfd-web`, the third and final workspace
         package. **225 tests, 96% coverage, real Python 3.9.25**; `rfd-core` (157) and `rfd-runner`
         (74) re-run unchanged, **456 total**. Everything is verified locally, as
@@ -817,7 +873,10 @@ prepared and awaiting execution on real Grex hardware.)*
   closed — `jax==0.4.7` / `jaxlib==0.4.7+cuda11.cudnn86` / `chex==0.1.82` / `optax==0.1.7` /
   `nvidia-cuda-nvcc-cu11==11.7.99` verified on a real A30 and now a real V100 end to end. Tier 2
   (§3, two images) was never needed.
-- **Next milestone**: **M2** (post-U3) — M1 is passed. Note M1's scope limits still stand and are
+- **Next milestone**: **M2** (post-U3) — never formally defined in `unit-of-work.md`, which
+  names only M1. What M2 would have covered for U3 is now done: U3's definition of done is
+  met on real hardware (jobs 7556197 submitted-and-completed from a generated script, 7556200
+  cancelled). The remaining pre-U4 gaps are listed under the U3 entry above. M1 is passed. Note M1's scope limits still stand and are
   NOT yet covered by any real run: `DesignMode.FIXED`/`PARTIAL` template resolution, AnAnaS /
   `symmetry=auto`, and `--stage backbone`/`--stage validate` used independently. Worth a manual
   spot-check before U4 exposes them through the web form (`docs/m1-verification.md`, "Known scope

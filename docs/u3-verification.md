@@ -1,6 +1,6 @@
 # U3 Verification on Grex
 
-**What this is for.** U3's own suite — 225 tests, 96% coverage — passes locally against
+**What this is for.** U3's own suite — 228 tests, 96% coverage — passes locally against
 `FakeSlurmAdapter` and stub binaries. That proves every reconciliation rule, every
 argument list, and the whole job script including its execution under `bash`. What it
 **cannot** prove is that Grex's Slurm emits the strings this code parses. This document
@@ -156,9 +156,15 @@ Everything the local suite could not prove, proved:
 
 ### Three things that run changed
 
-1. **`log_tail` returned a partial first line.** Reading the last 64 KB lands mid-line, so
-   a traceback tail began `nt call last):` — which reads like the start of the error and
-   is not. The partial line is now dropped. (`test_a_truncated_tail_drops_the_partial_first_line`)
+1. **`log_tail` could return a partial first line.** Reading the last 64 KB lands mid-line,
+   so the first line of a truncated read is a fragment. The fragment is now dropped
+   (`test_a_truncated_tail_drops_the_partial_first_line`).
+   **Caveat on the diagnosis**: this was prompted by a traceback tail that began
+   `nt call last):`, which was attributed to the byte seek. The fix did not change that
+   output on the next run, so that particular fragment is *not* the seek — it appears to
+   be in the file on disk. The fix is still correct for the case it names; it was simply
+   not the cause of what prompted it. Confirm with
+   `wc -c` and `head -c 80` on that run's `job-*.err`.
 2. **Recovered runs claimed a Slurm state nobody had asked for.** Runs indexed from
    `run.json` displayed `slurm=UNKNOWN` when no query had been made at all. Absence of
    knowledge is now `None`. (`test_a_run_recovered_from_disk_does_not_claim_a_slurm_state`)
@@ -216,3 +222,61 @@ app submitted.
   That is the correct display, but it means the phase can time out (`--max-minutes`,
   default 60) without telling you anything about the code. Requesting a preemptible
   partition (`-b` suffix) is materially faster for a short job.
+
+---
+
+## Phases 2 and 3 passed (2026-08-27, `yak`)
+
+**Phase 2 — real submission: 6 PASS / 0 FAIL.** Job **7556197**, run
+`u3smoke-20260827T165320`. The first time Slurm ran a job script this code *generated*
+rather than one written by hand.
+
+```
+16:53:21  queued    slurm=PENDING
+16:53:36  running   slurm=RUNNING  backbone step 0/50 (starting)
+16:54:21  running   slurm=RUNNING  backbone step 42/50 [live frame available]
+16:54:36  running   slurm=RUNNING  backbone step 49/50 [live frame available]
+16:55:06  completed slurm=COMPLETED
+```
+
+Queued 15 s, total elapsed ~1m45s. Outputs: backbone PDB, both trajectories (`pX0` and
+`Xt-1`), `best.pdb`, `best_design.pdb`, and the result zip. What this establishes beyond
+phase 1:
+
+- **S-1 end to end** — validate, derive run id, create directory, write `run.json`,
+  generate `job.sh`, `sbatch --parsable`, record the job id, index it.
+- **The full status vocabulary against real Slurm** — `PENDING → RUNNING → COMPLETED`,
+  each mapped correctly.
+- **Live progress (FR-16) and the live frame (FR-17)** — step counts advanced from real
+  `progress.json` writes, and `current_frame.pdb` appeared during the run.
+- **BR-2 on a real success** — reported `completed` because Slurm said `COMPLETED` *and*
+  `run.json` was finalised.
+- **BR-3** — re-reading the finished run issued no further Slurm calls.
+- **G-2** — the retained `job.sh` is resubmittable by hand.
+
+**Phase 3 — cancellation: 5 PASS / 0 FAIL.** Job 7556200 submitted and cancelled:
+reported as **cancelled**, attributed *"cancelled from this app at 16:56"* (BR-8 — the
+runner's misleading walltime sentence suppressed), and a second `cancel()` was not an
+error (BR-11).
+
+### Exit criteria: all four met
+
+U3's definition of done in `unit-of-work.md` — *"a run can be submitted, tracked to
+completion, and cancelled programmatically"* — is satisfied, and satisfied against **real
+Slurm** rather than only the fake the definition asks for.
+
+### Still not exercised by a real run
+
+- **BR-5's frozen-progress path.** Validation finished well inside the 120 s staleness
+  window, so *"validating (no step-level progress available)"* never appeared. Covered by
+  unit tests; not by this run. A longer design (`num_designs > 1`) would surface it.
+- **`resubmit()` / `--stage validate`** (FR-11). Reachable now, but not driven here.
+- M1's standing scope limits: `DesignMode.FIXED`/`PARTIAL`, and AnAnaS / `symmetry=auto`.
+
+### Worth re-running phase 1 now
+
+The phase-1 WARN — *"the sacct cross-check did not run on any indexed run"* — was true
+because no M1 directory carried a `slurm_job_id`. The two runs from phases 2 and 3 do.
+Re-running `--phase read-only` will now actually cross-check the reconciler against real
+`sacct` for a `COMPLETED` and a `CANCELLED` job, which is the one check phase 1 could not
+perform before.
