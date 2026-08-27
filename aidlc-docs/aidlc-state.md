@@ -661,8 +661,8 @@ prepared and awaiting execution on real Grex hardware.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
 - **Current Stage**: **Milestone M1 — blocked on real Grex GPU execution.** U1 + U2a + U2b are all
   code-complete and approved. This is the gate: it requires the user to run a hand-written `sbatch`
-  job on a real Grex login/GPU node, which this environment cannot do itself. **Four attempts so
-  far, four different root causes found and fixed, the fourth not yet re-verified**: (1, job
+  job on a real Grex login/GPU node, which this environment cannot do itself. **Seven attempts so
+  far, seven different root causes found and fixed, the seventh not yet re-verified**: (1, job
   7441234) `pydantic` missing — fixed, rebuild (job 7441239) confirmed it; (2, job 7441266)
   `dm-haiku==0.0.12` imports `jax.extend`, incompatible with the CUDA-11.6-mandated `jax==0.4.7`
   ceiling — fixed by downgrading to `dm-haiku==0.0.10`, rebuild confirmed it; (3, job 7442555)
@@ -671,7 +671,24 @@ prepared and awaiting execution on real Grex hardware.)*
   after a local dry-run surfaced a real NumPy-2.0 ABI-break risk — rebuild confirmed it; (4, job
   7443066) unbound `scipy` resolved to `1.13.1`, which removed `scipy.linalg.tril`/`triu` that
   `jax==0.4.7` references at module-import time — fixed by pinning `scipy==1.12.0`, the newest
-  release that still has both names. Not yet rebuilt.
+  release that still has both names; (5, job 7443486) the fork's own
+  `model_runners.py` calls `torch.load(..., weights_only=False)`, a kwarg that only exists from
+  torch 1.13 — fixed by a build-time `sed` patch in `containers/rfdiffusion.def` rather than a
+  torch bump (torch is pinned by the same CUDA-11.6 ceiling), rebuild confirmed it; (6, job of
+  2026-08-13T23:22Z) **BACKBONE completed for the first time**, VALIDATE failed with
+  `XlaRuntimeError: Couldn't invoke ptxas --version` — `nvidia-cuda-nvcc-cu11` was never installed,
+  so both of JAX's own ptxas lookup paths came up empty; fixed by adding
+  `nvidia-cuda-nvcc-cu11==11.7.99` to the same one-resolution-pass install, and `verify-image.sh`
+  check 4 was strengthened to force a real XLA compile (it previously only called `jax.devices()`,
+  so it structurally could not have caught this); (7, job 7556080) **exit 127 before the container
+  ever started** — `scripts/m1-submit.sh:63` hardcoded the CCEnv binary name `apptainer`, but
+  Grex's `singularity` module provides a `singularity` binary; `module load` had succeeded silently,
+  which is why `.err` held only that one line. Fixed by adopting the engine detection that
+  `build-image.sh`/`verify-image.sh`/`preflight-grex.sh` already used, and fixed at source in
+  `deployment-architecture.md` section 3's template so U3's JobScriptGenerator does not regenerate
+  the same bug into every future job script. Verified against a fake engine (four scenarios);
+  not yet re-run on Grex. **Round 6's ptxas fix has not yet had a real test — round 7 never
+  reached the GPU.**
 - **Completed**: U1 Code Generation and verification (2026-08-06/07, six rounds — three CPU, one
   GPU risk-materialization, one build-time resolver failure, one final GPU confirmation), U2a Core
   Domain (157 tests, 100% coverage, real Python 3.9.25), U2b Runner Functional Design and Code

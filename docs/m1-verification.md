@@ -74,9 +74,9 @@ On success, `<RUN_DIR>` should also contain `m1smoke_0.pdb` (backbone), `traj/` 
 | G-11 `$TMPDIR` scratch | bound to `/scratch` inside the container |
 | G-12 `SLURM_TMPDIR` | `export SLURM_TMPDIR=$TMPDIR` |
 | G-13 stage out | `ResultPackager.stage_out` runs before the process exits; `$TMPDIR` is discarded by Slurm at job end |
-| G-15 module | `module load singularity` |
+| G-15 module | `module load singularity` (falls back to `apptainer`), then the engine binary is detected off `PATH` — Grex's module gives `singularity`, CCEnv gives `apptainer` |
 | G-16 image pre-built | `$RFD_IMAGE` staged ahead of time by `scripts/build-image.sh`; never built or pulled at job start |
-| G-17 `--nv` | present on `apptainer exec` |
+| G-17 `--nv` | present on `$ENGINE exec` |
 | G-18 cache dir | both `APPTAINER_CACHEDIR` and `SINGULARITY_CACHEDIR` set explicitly |
 
 ## Known scope limits of this smoke test

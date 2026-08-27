@@ -104,11 +104,16 @@ export SLURM_TMPDIR=$TMPDIR
 export APPTAINER_CACHEDIR={cache_dir}
 export SINGULARITY_CACHEDIR={cache_dir}
 
-module load singularity
+# Grex's module is named `singularity` and provides a `singularity` binary;
+# CCEnv provides `apptainer`. Same program, same flags -- but the name must be
+# detected, not assumed. Assuming `apptainer` is what killed M1 job 7556080
+# with exit 127 before this note existed.
+module load singularity 2>/dev/null || module load apptainer 2>/dev/null || true
+ENGINE=$(command -v singularity || command -v apptainer)
 
 nvidia-smi
 
-apptainer exec --nv \
+$ENGINE exec --nv \
   --bind {project_root}:/opt/rfdgui:ro \
   --bind {weights_root}:/opt/weights:ro \
   --bind {output_root}:/opt/outputs \
