@@ -19,6 +19,7 @@ cell) at the pinned ColabDesign commit (e31a56fe1d9b4de25c8697f3a28b75892941cc72
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, List, Optional
 
 
@@ -32,6 +33,10 @@ def pdb_to_string(pdb: str, chains: Optional[Any] = None) -> str:
 
 
 def parse_pdb(filename: str) -> Any:
+    try:
+        Path("/scratch/schedules").mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     from inference.utils import parse_pdb as _parse_pdb
 
     return _parse_pdb(filename)

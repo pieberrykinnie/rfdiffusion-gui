@@ -105,6 +105,11 @@ def _run_backbone(
     record.started_at = record.started_at or datetime.now(timezone.utc)
     record.save(run_dir)
 
+    # U1 finding: the fork does os.mkdir() on this symlinked path at import time, which raises
+    # FileExistsError on a dangling symlink -- must exist before ANY import of inference/model_runners
+    # or parse_pdb.
+    (deps.dump_dir / "schedules").mkdir(parents=True, exist_ok=True)
+
     spec = ContigSpec.parse(request.contigs)
     mode = infer_mode(spec)
     symmetry_plan = resolve_symmetry(request.symmetry, request.order, request.add_potential)
@@ -150,10 +155,6 @@ def _run_backbone(
         )
 
     iteration_plan = plan_iterations(mode, request.iterations, request.partial_T)
-
-    # U1 finding: the fork does os.mkdir() on this symlinked path at import time, which raises
-    # FileExistsError on a dangling symlink -- must exist before run_inference.py is invoked.
-    (deps.dump_dir / "schedules").mkdir(parents=True, exist_ok=True)
 
     argv = build_inference_argv(
         mode=mode,
