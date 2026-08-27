@@ -6,6 +6,10 @@ readme = "README.md"
 requires-python = ">=3.9,<3.10"
 dependencies = [
     "rfd-core",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.6",
 ]
 
 # NO FastAPI/uvicorn/Jinja2 here. U3 contains no HTTP code at all; declaring a web
@@ -38,6 +42,8 @@ rfd-core = { workspace = true }
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "httpx>=0.24.0",
+    "pytest-asyncio>=1.2.0",
 ]
 
 [build-system]

@@ -123,3 +123,23 @@ def stub_bin(tmp_path: Path, monkeypatch):
     bin_dir.mkdir()
     monkeypatch.setenv("PATH", "{0}{1}{2}".format(bin_dir, os.pathsep, os.environ["PATH"]))
     return bin_dir
+
+from fastapi.testclient import TestClient
+from httpx import AsyncClient
+from rfd_web.app import create_app
+import pytest_asyncio
+
+@pytest.fixture
+def app(config, adapter, layout):
+    return create_app(config=config, slurm=adapter, layout=layout)
+
+from httpx import ASGITransport
+
+@pytest_asyncio.fixture
+async def client(app):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+@pytest.fixture
+def sync_client(app):
+    return TestClient(app)

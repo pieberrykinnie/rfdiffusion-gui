@@ -1,0 +1,19 @@
+<div id="status-container" class="status-fragment">
+    <div class="status-badge status-{{ run.status.value | lower }}" data-testid="status-badge">
+        {{ run.status.value }}
+    </div>
+    
+    {% if run.status.value in ["PENDING", "RUNNING"] %}
+        <div class="progress-bar-container">
+            <div class="progress-bar" style="width: {{ run.progress | default(0) }}%" data-testid="progress-bar"></div>
+        </div>
+        
+        <form hx-post="/runs/{{ run.run_id }}/cancel" hx-target="#status-container" hx-swap="outerHTML">
+            <button type="submit" class="btn btn-danger" data-testid="btn-cancel-run">Cancel Run</button>
+        </form>
+    {% endif %}
+
+    {% if run.status.value == "VALIDATING" %}
+        <p class="status-note" data-testid="status-note">Validating outputs using ProteinMPNN and AlphaFold2...</p>
+    {% endif %}
+</div>

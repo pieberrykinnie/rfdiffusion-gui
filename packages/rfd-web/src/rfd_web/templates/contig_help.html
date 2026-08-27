@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Contig Help - RFdiffusion GUI{% endblock %}
+
+{% block content %}
+<h1>Contig Definition Help</h1>
+
+<p>
+    The <code>contigs</code> string defines the regions of the protein structure that are fixed (taken from the input template) and the regions that are free (to be hallucinated/diffused by the model).
+</p>
+
+<h2>Syntax</h2>
+<ul>
+    <li><b>Free segments (hallucinated):</b> Specified by a single integer (e.g., <code>50</code>) or a range (e.g., <code>10-50</code>).</li>
+    <li><b>Fixed segments (from template):</b> Specified by chain ID and residue range (e.g., <code>A10-20</code>) or just chain ID for the whole chain (e.g., <code>A</code>).</li>
+    <li><b>Chain breaks:</b> Use <code>/0 </code> (zero and a space) to indicate a chain break. Note that internally RFdiffusion uses <code>/0 </code> but for the GUI we use spaces or slashes to separate blocks if they are distinct chains.</li>
+</ul>
+
+<h2>Examples</h2>
+<ul>
+    <li>
+        <strong>Unconditional generation (Hallucination):</strong>
+        <br><code>100</code>
+        <br>Builds a 100-residue protein from scratch.
+    </li>
+    <li>
+        <strong>Motif Scaffolding (Inpainting):</strong>
+        <br><code>10-40/A10-25/10-40</code>
+        <br>Builds a protein with 10-40 hallucinated residues, followed by residues 10-25 from chain A of the template, followed by 10-40 hallucinated residues.
+    </li>
+    <li>
+        <strong>Binder Design:</strong>
+        <br><code>A/10-100</code>
+        <br>Uses all of chain A as a fixed target, and builds a 10-100 residue hallucinated binder against it.
+    </li>
+</ul>
+
+{% endblock %}

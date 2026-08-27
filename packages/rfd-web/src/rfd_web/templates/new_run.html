@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}New Run - RFdiffusion GUI{% endblock %}
+
+{% block content %}
+<h1>Create New Run</h1>
+
+{% if errors %}
+<div class="alert alert-danger" data-testid="validation-errors">
+    <ul>
+    {% for error in errors %}
+        <li>{{ error }}</li>
+    {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<form action="/runs" method="post" enctype="multipart/form-data">
+    <fieldset>
+        <legend>Basic Settings</legend>
+        <div class="form-group">
+            <label for="name">Run Name</label>
+            <input type="text" id="name" name="name" required data-testid="input-name">
+        </div>
+
+        <div class="form-group">
+            <label for="contigs">Contigs <a href="/help/contigs" target="_blank" data-testid="link-contig-help">(Help)</a></label>
+            <input type="text" id="contigs" name="contigs" required 
+                   hx-post="/api/preview-mode" 
+                   hx-target="#mode-preview" 
+                   hx-trigger="keyup changed delay:500ms"
+                   data-testid="input-contigs">
+            <div id="mode-preview" data-testid="mode-preview"></div>
+        </div>
+
+        <div class="form-group">
+            <label for="pdb_file">Template PDB File (Optional)</label>
+            <input type="file" id="pdb_file" name="pdb_file" accept=".pdb" data-testid="input-pdb-file">
+        </div>
+        
+        <div class="form-group">
+            <label for="hotspots">Hotspots (e.g., A10,A12,A15)</label>
+            <input type="text" id="hotspots" name="hotspots" data-testid="input-hotspots">
+        </div>
+
+        <div class="form-group">
+            <label for="iterations">Iterations</label>
+            <input type="number" id="iterations" name="iterations" value="50" min="1" max="200" data-testid="input-iterations">
+        </div>
+
+        <div class="form-group">
+            <label for="num_designs">Number of Designs</label>
+            <input type="number" id="num_designs" name="num_designs" value="1" min="1" data-testid="input-num-designs">
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Symmetry</legend>
+        <div class="form-group">
+            <label for="symmetry_kind">Kind</label>
+            <select id="symmetry_kind" name="symmetry_kind" data-testid="select-symmetry-kind">
+                <option value="none" selected>None</option>
+                <option value="auto" {% if not ananas_available %}disabled{% endif %}>Auto {% if not ananas_available %}(Requires Ananas){% endif %}</option>
+                <option value="cyclic">Cyclic</option>
+                <option value="dihedral">Dihedral</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="symmetry_order">Order (1-12)</label>
+            <input type="number" id="symmetry_order" name="symmetry_order" value="1" min="1" max="12" data-testid="input-symmetry-order">
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Advanced Parameters</legend>
+        <div class="form-group">
+            <label for="chains">Chains to Diffuse</label>
+            <input type="text" id="chains" name="chains" data-testid="input-chains">
+        </div>
+        <div class="form-group">
+            <label><input type="checkbox" name="add_potential" data-testid="checkbox-add-potential"> Add Potential</label>
+        </div>
+        <div class="form-group">
+            <label for="partial_T">Partial T (1-200)</label>
+            <input type="number" id="partial_T" name="partial_T" data-testid="input-partial-t">
+        </div>
+        <div class="form-group">
+            <label><input type="checkbox" name="use_beta_model" data-testid="checkbox-use-beta-model"> Use Beta Model</label>
+        </div>
+        <div class="form-group">
+            <label><input type="checkbox" name="live_preview" data-testid="checkbox-live-preview"> Live Preview</label>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Validation Parameters</legend>
+        <div class="form-group">
+            <label for="num_seqs">Number of Sequences</label>
+            <input type="number" id="num_seqs" name="num_seqs" value="8" min="1" data-testid="input-num-seqs">
+        </div>
+        <div class="form-group">
+            <label for="mpnn_sampling_temp">MPNN Sampling Temp</label>
+            <input type="number" step="0.1" id="mpnn_sampling_temp" name="mpnn_sampling_temp" value="0.1" data-testid="input-mpnn-temp">
+        </div>
+        <div class="form-group">
+            <label for="rm_aa">Remove Amino Acids (e.g., C)</label>
+            <input type="text" id="rm_aa" name="rm_aa" data-testid="input-rm-aa">
+        </div>
+        <div class="form-group">
+            <label><input type="checkbox" name="use_soluble_mpnn" data-testid="checkbox-soluble-mpnn"> Use Soluble MPNN</label>
+        </div>
+        <div class="form-group">
+            <label><input type="checkbox" name="initial_guess" data-testid="checkbox-initial-guess"> Initial Guess</label>
+        </div>
+        <div class="form-group">
+            <label for="num_recycles">Number of Recycles (AlphaFold)</label>
+            <input type="number" id="num_recycles" name="num_recycles" value="3" min="1" data-testid="input-num-recycles">
+        </div>
+        <div class="form-group">
+            <label><input type="checkbox" name="use_multimer" data-testid="checkbox-use-multimer"> Use Multimer (AlphaFold)</label>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Slurm Parameters</legend>
+        <div class="form-group">
+            <label for="slurm_partition">Partition</label>
+            <select id="slurm_partition" name="slurm_partition" data-testid="select-slurm-partition">
+                {% for partition in partitions %}
+                    <option value="{{ partition.name }}">{{ partition.name }}{% if not partition.is_compatible %} (Incompatible){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="slurm_account">Account</label>
+            <input type="text" id="slurm_account" name="slurm_account" data-testid="input-slurm-account">
+        </div>
+        <div class="form-group">
+            <label for="slurm_walltime">Walltime</label>
+            <input type="text" id="slurm_walltime" name="slurm_walltime" value="02:00:00" data-testid="input-slurm-walltime">
+        </div>
+        <div class="form-group">
+            <label for="slurm_gpus">GPUs</label>
+            <input type="number" id="slurm_gpus" name="slurm_gpus" value="1" min="0" data-testid="input-slurm-gpus">
+        </div>
+        <div class="form-group">
+            <label for="slurm_cpus_per_task">CPUs per Task</label>
+            <input type="number" id="slurm_cpus_per_task" name="slurm_cpus_per_task" value="2" min="1" data-testid="input-slurm-cpus">
+        </div>
+        <div class="form-group">
+            <label for="slurm_mem_per_cpu">Memory per CPU</label>
+            <input type="text" id="slurm_mem_per_cpu" name="slurm_mem_per_cpu" value="4G" data-testid="input-slurm-mem">
+        </div>
+    </fieldset>
+
+    <button type="submit" class="btn btn-primary" data-testid="btn-submit-run">Submit Run</button>
+</form>
+{% endblock %}

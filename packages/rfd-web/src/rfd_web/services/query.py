@@ -66,6 +66,7 @@ class RunView:
     slurm_state: Optional[SlurmState] = None
     exit_code: Optional[int] = None
     mode: Optional[DesignMode] = None
+    num_designs: Optional[int] = None
     backbone_state: Optional[StageState] = None
     validate_state: Optional[StageState] = None
     progress: Optional[ProgressView] = None
@@ -319,6 +320,7 @@ class RunQueryService:
             slurm_state=slurm.state if (slurm is not None and slurm.known) else None,
             exit_code=slurm.exit_code if slurm is not None else None,
             mode=record.mode,
+            num_designs=record.request.num_designs if record.request else None,
             backbone_state=record.backbone_state,
             validate_state=record.validate_state,
             progress=progress,

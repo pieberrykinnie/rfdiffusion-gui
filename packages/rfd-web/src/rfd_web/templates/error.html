@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Error - RFdiffusion GUI{% endblock %}
+
+{% block content %}
+<div class="error-container">
+    <h1>An Error Occurred</h1>
+    <p>{{ error_message }}</p>
+    <a href="/" data-testid="error-home-btn" class="btn btn-primary">Return Home</a>
+</div>
+{% endblock %}

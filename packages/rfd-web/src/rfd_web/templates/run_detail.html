@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Run Details - {{ run.name }} - RFdiffusion GUI{% endblock %}
+
+{% block content %}
+<div class="run-header">
+    <h1>{{ run.name }}</h1>
+    <div id="status-container" 
+         hx-get="/runs/{{ run.run_id }}/status" 
+         {% if run.status.value not in ["COMPLETED", "FAILED", "CANCELLED"] %}hx-trigger="every 5s"{% endif %}
+         data-testid="status-container">
+        <!-- Fragment will load here -->
+        <div class="status-badge status-{{ run.status.value | lower }}" data-testid="status-badge">
+            {{ run.status.value }}
+        </div>
+    </div>
+    <div class="run-meta">Created: {{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+</div>
+
+<div class="run-actions">
+    <a href="/runs/{{ run.run_id }}/clone" class="btn btn-secondary" data-testid="btn-clone-run">Clone Run</a>
+</div>
+
+{% if run.status.value == "FAILED" %}
+<div class="error-log-section">
+    <h3>Error Details</h3>
+    <details>
+        <summary data-testid="summary-error-logs">View Logs</summary>
+        <pre data-testid="pre-error-log">{{ error_logs }}</pre>
+    </details>
+</div>
+{% endif %}
+
+<div class="results-section">
+    <h3>Results</h3>
+    
+    {% if run.status.value == "COMPLETED" %}
+    <div class="download-actions">
+        <a href="/runs/{{ run.run_id }}/download" class="btn btn-primary" data-testid="btn-download-zip">Download ZIP</a>
+    </div>
+    {% endif %}
+    
+    <div class="viewer-controls">
+        {% if run.num_designs and run.num_designs > 1 %}
+        <label for="design-selector">Design:</label>
+        <select id="design-selector" data-testid="select-design">
+            {% for i in range(run.num_designs) %}
+            <option value="{{ i }}">Design {{ i }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
+        
+        <label for="color-scheme">Color Scheme:</label>
+        <select id="color-scheme" data-testid="select-color-scheme">
+            <option value="chain">Chain</option>
+            <option value="plddt">pLDDT</option>
+            <option value="spectrum">Spectrum</option>
+        </select>
+        
+        <button id="toggle-trajectory" class="btn btn-secondary" data-testid="btn-toggle-trajectory">Play Trajectory</button>
+        <button id="toggle-overlay" class="btn btn-secondary" data-testid="btn-toggle-overlay">Overlay Best</button>
+    </div>
+
+    <div id="3dmol-viewer" style="height: 400px; width: 100%; position: relative;" data-testid="viewer-container"></div>
+    
+    {% if results_files %}
+    <div class="file-links">
+        <h4>Individual Files</h4>
+        <ul>
+            {% for file in results_files %}
+            <li><a href="/runs/{{ run.run_id }}/files/{{ file }}" data-testid="link-file-{{ loop.index }}">{{ file }}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

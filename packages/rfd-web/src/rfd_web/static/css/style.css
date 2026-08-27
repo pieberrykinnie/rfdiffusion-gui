@@ -1,0 +1,140 @@
+:root {
+  --bg-dark: #0f172a;
+  --bg-panel: #1e293b;
+  --text-primary: #f8fafc;
+  --text-muted: #94a3b8;
+  --border-color: #334155;
+  --accent-color: #38bdf8;
+  --accent-hover: #0284c7;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Layout */
+.app-container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 350px;
+  background-color: var(--bg-panel);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.viewer-container {
+  flex: 1;
+  position: relative;
+  background-color: #000;
+}
+
+#3dmol-viewer {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* Status Badges */
+.badge {
+  display: inline-block;
+  padding: 0.25em 0.6em;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 9999px;
+  text-transform: uppercase;
+}
+
+.badge-queued { background-color: var(--text-muted); color: var(--bg-dark); }
+.badge-running { background-color: var(--accent-color); color: var(--bg-dark); }
+.badge-completed { background-color: var(--success); color: var(--bg-dark); }
+.badge-failed { background-color: var(--danger); color: white; }
+.badge-cancelled { background-color: var(--warning); color: var(--bg-dark); }
+.badge-timeout { background-color: var(--danger); color: white; }
+
+/* Forms & Controls */
+.form-group {
+  margin-bottom: 1rem;
+}
+.form-label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+.form-control {
+  width: 100%;
+  padding: 0.5rem;
+  background-color: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 0.25rem;
+}
+.btn {
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  background-color: var(--accent-color);
+  color: var(--bg-dark);
+  transition: background-color 0.2s;
+}
+.btn:hover {
+  background-color: var(--accent-hover);
+}
+
+/* Progress Bar */
+.progress {
+  width: 100%;
+  height: 0.5rem;
+  background-color: var(--border-color);
+  border-radius: 9999px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+.progress-bar {
+  height: 100%;
+  background-color: var(--accent-color);
+  transition: width 0.3s ease;
+}
+
+.viewer-controls {
+  position: absolute;
+  bottom: 1rem;
+  left: 1rem;
+  right: 1rem;
+  background-color: rgba(30, 41, 59, 0.8);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  backdrop-filter: blur(4px);
+  z-index: 10;
+}

@@ -4,26 +4,11 @@
 - **Project Name**: rfdiffusion-gui
 - **Project Type**: Brownfield
 - **Start Date**: 2026-07-30T22:57:31Z
-- **Current Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: **U3 Slurm and Persistence — Code Generation APPROVED 2026-08-27
-  ("Approve and Park"). WORKFLOW PARKED at the U3/U4 boundary by user request.** U3 is
-  complete and verified on real Grex hardware. **U4 Web Application (Code Generation only)
-  is the next stage and has NOT been started.** To resume: begin U4 Code Generation Part 1
-  (planning), per the execution plan. U3's Code Generation was verified before approval: U3's definition of done from
-  unit-of-work.md — *"a run can be submitted, tracked to completion, and cancelled
-  programmatically"* — is met against **real Slurm**, not merely against the fake the
-  definition asks for: `scripts/u3-verify.py` phase 1 (34 PASS / 1 WARN / 0 FAIL,
-  real `sinfo`/`squeue`/`sacct`), phase 2 (**job 7556197 submitted from a GENERATED job
-  script, ran, and completed** — queued 15 s, elapsed ~1m45s, full output set), and
-  phase 3 (job 7556200 cancelled and correctly reported as cancelled, attributed to the
-  app, with the runner's misleading walltime sentence suppressed per BR-8). See
-  `docs/u3-verification.md`. Functional Design approved, the 20-step code-generation plan approved, and all
-  43 plan checkboxes ticked. `packages/rfd-web` now exists: **225 tests, 96% coverage, on real
-  Python 3.9.25**, with the pre-existing 231 (`rfd-core` 157 + `rfd-runner` 74) re-run and
-  unchanged — **456 total**. Summary at
-  `aidlc-docs/construction/u3-slurm-persistence/code/u3-code-summary.md`. U1 (PASS 13/FAIL 0, 2026-08-07),
-  U2a and U2b are complete and approved, and **Milestone M1 PASSED 2026-08-27** on real Grex
-  hardware (job 7556085), which is what unblocked U3.
+- **Current Phase**: **CONSTRUCTION (U4 Code Generation COMPLETE)**
+- **Current Stage**: **U4 Web Application — Code Generation COMPLETE & VERIFIED 2026-08-27**.
+  25-step execution plan fully executed by swarms of developer & adversarial reviewer subagents.
+  All 481 workspace unit & integration tests passing (`rfd-core`: 157, `rfd-runner`: 74, `rfd-web`: 250).
+  Code summary published at `aidlc-docs/construction/u4-web-application/code/u4-code-summary.md`.
 
 ## ✅ U1 Verification — First Real Execution (2026-08-06, node `n339`)
 
@@ -804,7 +789,7 @@ Workflow Planning and favours skipping optional stages.
         exceeded" while Slurm reports `CANCELLED`, so S-2 must reconcile a real contradiction;
         (F-4) runtime partition discovery (FR-6a) will surface `lgpu`, which the Phase 1 CUDA 11.6
         image cannot run on. Six decisions were taken without asking (D-1…D-6 in the plan).
-- [ ] U4 Web Application: Code Generation **EXECUTE**
+- [x] U4 Web Application: Code Generation **COMPLETE** (2026-08-27, 250 tests passing in rfd-web, 481 total)
       (Functional Design SKIP, NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
 - [ ] Build and Test - **EXECUTE**
 

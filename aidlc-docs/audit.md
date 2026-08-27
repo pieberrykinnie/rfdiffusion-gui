@@ -927,3 +927,19 @@ JobID           JobName      State ExitCode    Elapsed
 **Context**: CONSTRUCTION - U3 Code Generation APPROVED. Workflow PARKED at the U3/U4 boundary by user request; U4 not started. Capability question answered: full RFdiffusion+ProteinMPNN+AlphaFold pipeline is submittable programmatically today, but only the notebook's unconditional protocol has ever run on real hardware.
 
 ---
+
+## Session Resumption — U4 Web Application Code Generation
+**Timestamp**: 2026-08-27T22:07:15Z
+**User Input**: "Continue with development using AI-DLC"
+**AI Response**: "Session continuity detected. Read aidlc-state.md: workflow PARKED at U3/U4 boundary, U3 verified and approved 2026-08-27. Loaded all prior artifacts: requirements.md, application-design (components, component-methods, services, component-dependency, unit-of-work, unit-of-work-dependency, unit-of-work-story-map), U3 functional-design (business-logic-model, business-rules, domain-entities), U3 code summary, all existing rfd-web source (18 modules), rfd-core validation.py, env.example, and code-generation.md rules. Presenting session continuity prompt and proceeding to U4 Code Generation Part 1 (Planning)."
+**Context**: CONSTRUCTION - Session resumed. Next stage: U4 Web Application - Code Generation Part 1 (Planning). All prior context loaded per session-continuity.md rules.
+
+---
+
+## U4 Web Application — Code Generation Part 2 (Generation) — COMPLETE & VERIFIED
+**Timestamp**: 2026-08-27T17:53:15Z
+**User Input**: "Approve Plan. When implementing, use swarms of developer and adversarial reviewer agents"
+**AI Response**: "All 25 plan steps fully executed using swarms of Developer and Adversarial Reviewer subagent pairs across 4 execution batches. All 16 HTTP route endpoints, FastAPI factory, Jinja2 templates, vendored 3Dmol.js/HTMX, ResultService (S-3), TemplateUploadHandler (C-27), form validation glue, dark-mode CSS, 3Dmol viewer JS, entry point (__main__.py), and 250 tests implemented and verified. Adversarial reviewers audited Python 3.9 compatibility, path containment (BR-14), data-testid coverage, no-CDN enforcement (NFR-3), and zero rfd-runner imports. All 481 workspace tests pass cleanly (rfd-core: 157, rfd-runner: 74, rfd-web: 250)."
+**Context**: CONSTRUCTION - U4 Code Generation Part 2 COMPLETE. All U4 requirements (FR-1..FR-34, NFR-3/14/15/16) implemented and verified. Next step: Build and Test.
+
+---

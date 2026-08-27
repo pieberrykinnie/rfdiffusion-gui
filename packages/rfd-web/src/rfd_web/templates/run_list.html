@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Runs - RFdiffusion GUI{% endblock %}
+
+{% block content %}
+<div class="list-header">
+    <h1>Run List</h1>
+    <a href="/runs/new" class="btn btn-primary" data-testid="btn-new-run">New Run</a>
+</div>
+
+<table class="run-list-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Mode</th>
+            <th>Partition</th>
+            <th>Created At</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for run in runs %}
+        <tr data-testid="run-row-{{ run.run_id }}">
+            <td><a href="/runs/{{ run.run_id }}" data-testid="link-run-detail-{{ run.run_id }}">{{ run.name }}</a></td>
+            <td><span class="status-badge status-{{ run.status.value | lower }}" data-testid="badge-status-{{ run.run_id }}">{{ run.status.value }}</span></td>
+            <td>{{ run.mode | default('-') }}</td>
+            <td>{{ run.slurm_partition }}</td>
+            <td>{{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+            <td>
+                <a href="/runs/{{ run.run_id }}" class="btn btn-sm btn-info" data-testid="btn-view-{{ run.run_id }}">View</a>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="6" class="text-center">No runs found.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
