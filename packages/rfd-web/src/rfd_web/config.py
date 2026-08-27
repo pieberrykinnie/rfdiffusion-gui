@@ -66,8 +66,14 @@ class WebConfig:
 
         account = e.get("RFD_DEFAULT_ACCOUNT", "").strip()
 
+        grex_root = Path("/home/vuqh1/projects/def-cardona/vuqh1/rfdiffusion-gui")
         auto_root = Path(__file__).resolve().parents[3]
-        default_project_root = auto_root if (auto_root / "packages").exists() else home / "rfdiffusion-gui"
+        if grex_root.exists():
+            default_project_root = grex_root
+        elif (auto_root / "packages").exists():
+            default_project_root = auto_root
+        else:
+            default_project_root = home / "rfdiffusion-gui"
 
         return cls(
             status_poll_seconds=_int(e, "RFD_STATUS_POLL_SECONDS", 5),
