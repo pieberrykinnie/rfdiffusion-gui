@@ -66,6 +66,9 @@ class WebConfig:
 
         account = e.get("RFD_DEFAULT_ACCOUNT", "").strip()
 
+        auto_root = Path(__file__).resolve().parents[3]
+        default_project_root = auto_root if (auto_root / "packages").exists() else home / "rfdiffusion-gui"
+
         return cls(
             status_poll_seconds=_int(e, "RFD_STATUS_POLL_SECONDS", 5),
             slurm_timeout_seconds=_int(e, "RFD_SLURM_TIMEOUT_SECONDS", 30),
@@ -81,7 +84,7 @@ class WebConfig:
             default_cpus_per_task=_int(e, "RFD_DEFAULT_CPUS_PER_TASK", 6),
             default_mem_per_cpu=e.get("RFD_DEFAULT_MEM_PER_CPU", "6000M"),
             default_walltime=e.get("RFD_DEFAULT_WALLTIME", "0-08:00:00"),
-            project_root=Path(e.get("RFD_PROJECT_ROOT", str(home / "rfdiffusion-gui"))),
+            project_root=Path(e.get("RFD_PROJECT_ROOT", str(default_project_root))),
             apptainer_cachedir=Path(
                 e.get("APPTAINER_CACHEDIR", str(home / ".cache" / "apptainer"))
             ),
