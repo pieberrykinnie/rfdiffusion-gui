@@ -24,25 +24,31 @@ class ResultService:
         run_dir = self.layout.run_dir(run_id)
         if not run_dir.exists():
             return None
-        pdbs = sorted(run_dir.rglob("*.pdb"))
-        for p in pdbs:
-            if p.name.startswith(".") or p.name == "input.pdb":
-                continue
+        
+        ignored = {"input.pdb", "ananas_input.pdb"}
+        valid_pdbs = [
+            p for p in sorted(run_dir.rglob("*.pdb"))
+            if not p.name.startswith(".") and p.name not in ignored and p.stat().st_size > 0
+        ]
+        
+        for p in valid_pdbs:
             if p.stem.endswith(f"_{design_index}") or p.stem == f"design_{design_index}":
                 return p
-        for p in pdbs:
+        for p in valid_pdbs:
             if "best" in p.stem:
                 return p
-        for p in pdbs:
-            if not p.name.startswith(".") and p.name != "input.pdb":
-                return p
+        frame = run_dir / "current_frame.pdb"
+        if frame.exists() and frame.stat().st_size > 0:
+            return frame
+        if valid_pdbs:
+            return valid_pdbs[0]
         return None
 
     def get_trajectory(self, run_id: str, design_index: int) -> Optional[Path]:
         run_dir = self.layout.run_dir(run_id)
         if not run_dir.exists():
             return None
-        trajs = sorted(run_dir.rglob("*traj*.pdb"))
+        trajs = [p for p in sorted(run_dir.rglob("*traj*.pdb")) if p.stat().st_size > 0]
         if trajs:
             return trajs[0]
         return None

@@ -14,7 +14,7 @@ class PDBViewer {
         if (!el && this.container) {
             el = document.createElement('div');
             el.id = 'viewer-status-text';
-            el.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#94a3b8;font-size:0.9rem;text-align:center;pointer-events:none;z-index:5;background:rgba(15,23,42,0.8);padding:0.5rem 1rem;border-radius:6px;border:1px solid rgba(255,255,255,0.1);';
+            el.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#94a3b8;font-size:0.9rem;text-align:center;pointer-events:none;z-index:5;background:rgba(15,23,42,0.85);padding:0.6rem 1.2rem;border-radius:8px;border:1px solid rgba(255,255,255,0.1);box-shadow:0 4px 12px rgba(0,0,0,0.5);';
             this.container.appendChild(el);
         }
         if (el) {
@@ -35,27 +35,26 @@ class PDBViewer {
         try {
             const pdbData = await this.fetchPDB(url);
             if (!pdbData || (!pdbData.includes('ATOM') && !pdbData.includes('HETATM'))) {
-                this.setStatus('No valid PDB coordinates found', true);
+                this.setStatus('No valid PDB coordinates found for this run', true);
                 return;
             }
             this.viewer.clear();
-            this.viewer.addModel(pdbData, "pdb");
+            const model = this.viewer.addModel(pdbData, "pdb");
             
             let style = {};
             if (scheme === 'spectrum' || scheme === 'rainbow') {
-                style = {cartoon: {color: 'spectrum'}};
+                style = {cartoon: {color: 'spectrum'}, stick: {radius: 0.15, colorscheme: 'spectrum'}};
             } else if (scheme === 'chain') {
-                style = {cartoon: {colorscheme: 'chain'}};
+                style = {cartoon: {colorscheme: 'chain'}, stick: {radius: 0.15, colorscheme: 'chain'}};
             } else if (scheme === 'plddt') {
-                style = {cartoon: {
-                    colorfunc: (atom) => {
-                        const b = atom.b;
-                        if (b > 90) return 'blue';
-                        if (b > 70) return 'cyan';
-                        if (b > 50) return 'yellow';
-                        return 'red';
-                    }
-                }};
+                const colorFunc = (atom) => {
+                    const b = atom.b;
+                    if (b > 90) return 'blue';
+                    if (b > 70) return 'cyan';
+                    if (b > 50) return 'yellow';
+                    return 'red';
+                };
+                style = {cartoon: {colorfunc: colorFunc}, stick: {radius: 0.15, colorfunc: colorFunc}};
             }
             
             this.viewer.setStyle({}, style);
@@ -76,7 +75,7 @@ class PDBViewer {
             if (!pdbData || (!pdbData.includes('ATOM') && !pdbData.includes('HETATM'))) return;
             this.viewer.clear();
             this.viewer.addModel(pdbData, "pdb");
-            this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}});
+            this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}, stick: {radius: 0.15}});
             this.viewer.zoomTo();
             this.viewer.resize();
             this.viewer.render();
@@ -93,7 +92,7 @@ class PDBViewer {
             const pdbData = await this.fetchPDB(url);
             this.viewer.clear();
             this.viewer.addModelsAsFrames(pdbData, "pdb");
-            this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}});
+            this.viewer.setStyle({}, {cartoon: {color: 'spectrum'}, stick: {radius: 0.15}});
             this.viewer.zoomTo();
             this.viewer.resize();
             this.viewer.animate({loop: "backAndForth", step: 1});
@@ -111,8 +110,8 @@ class PDBViewer {
             const pdbData = await this.fetchPDB(url);
             this.viewer.clear();
             this.viewer.addModelsAsFrames(pdbData, "pdb");
-            this.viewer.setStyle({model: 0}, {cartoon: {color: 'gray'}});
-            this.viewer.setStyle({model: 1}, {cartoon: {colorscheme: {prop: 'b', gradient: 'roygb', min: 50, max: 90}}});
+            this.viewer.setStyle({model: 0}, {cartoon: {color: 'gray'}, stick: {radius: 0.12, color: 'gray'}});
+            this.viewer.setStyle({model: 1}, {cartoon: {colorscheme: {prop: 'b', gradient: 'roygb', min: 50, max: 90}}, stick: {radius: 0.15}});
             this.viewer.zoomTo();
             this.viewer.resize();
             this.viewer.render();
@@ -149,7 +148,6 @@ document.addEventListener('DOMContentLoaded', () => {
         window.pdbViewer = new PDBViewer('3dmol-viewer');
     }
 
-    // Design selector logic
     const designSelector = document.getElementById('design-selector');
     if (designSelector) {
         designSelector.addEventListener('change', (e) => {
@@ -161,7 +159,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Color scheme selector logic
     const colorScheme = document.getElementById('color-scheme');
     if (colorScheme && designSelector) {
         colorScheme.addEventListener('change', (e) => {
