@@ -1,5 +1,13 @@
 # Milestone M1 — Working CLI Pipeline Verification
 
+> **STATUS: ✅ PASSED 2026-08-27** — job 7556085, node `g325`, real Tesla V100-SXM2-32GB,
+> elapsed 00:01:27. All 5 exit criteria met: `backbone_state` and `validate_state` both
+> `completed`, `error: null`, `sacct` `COMPLETED` / `0:0`, and the full output set
+> (`m1smoke_0.pdb`, `traj/`, `m1smoke/best.pdb`, `m1smoke/best_design.pdb`,
+> `m1smoke.result.zip`). Took eight executions and seven distinct root causes; see
+> `aidlc-docs/aidlc-state.md` and `aidlc-docs/audit.md` for the chain. The instructions below
+> remain valid for re-running the smoke test.
+
 **What this is**: the first time U1 (container), U2a (`rfd-core`), and U2b (`rfd-runner`) run
 together, on a real Grex GPU node, with no web app in the loop. Per
 `aidlc-docs/inception/application-design/unit-of-work.md`, this milestone gates all further work

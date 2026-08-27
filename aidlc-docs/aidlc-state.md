@@ -477,9 +477,32 @@ Workflow Planning and favours skipping optional stages.
         `aidlc-docs/construction/u2b-runner/code/u2b-code-summary.md`
       - **Code Generation APPROVED 2026-08-13** ("Approve code generation and continue with AI-DLC
         until the codebase is at a gate that requires verification on grex")
-- [ ] **Milestone M1** — working CLI pipeline, verified by hand-written `sbatch` on a Grex GPU node.
-      **BLOCKED ON REAL GREX HARDWARE — this is the gate.** Verification artifacts prepared
-      2026-08-13:
+- [x] **Milestone M1** — working CLI pipeline, verified by hand-written `sbatch` on a Grex GPU node.
+      **✅ PASSED 2026-08-27 (job 7556085, node `g325`, real Tesla V100-SXM2-32GB, elapsed
+      00:01:27).** All 5 exit criteria from unit-of-work.md met on real hardware: (1) the container
+      ran `run_inference.py` on a Grex GPU node — `backbone_state: "completed"`, `m1smoke_0.pdb`
+      and `traj/` written; (2) a real design completed via plain `sbatch` with a hand-written
+      script — `sacct` reports `COMPLETED` / `0:0`; (3) the job script conforms to G-1…G-18 (see
+      the table in `docs/m1-verification.md`, with the G-15/G-17 rows corrected in round 7);
+      (4) `run.json`, `progress.json` and `current_frame.pdb` were all written as specified;
+      (5) `rfd-core`'s suite passes independently (231 tests across rfd-core + rfd-runner).
+      Final `run.json`: `backbone_state: "completed"`, `validate_state: "completed"`,
+      `error: null`, outputs `m1smoke/best.pdb`, `m1smoke/best_design.pdb`,
+      `m1smoke.result.zip`. **Seven real executions, seven distinct root causes** — see the
+      Current Stage entry below and `aidlc-docs/audit.md` for the full chain. **U3 is now
+      unblocked.**
+
+      Two non-blocking observations recorded at the pass, neither affecting the M1 criteria:
+      - `progress.json` freezes once BACKBONE ends (final read: `stage: "backbone"`, step 49/50).
+        By design — `ProgressReporter` is only wired into `_run_backbone`; `_run_validate`
+        (`orchestrator.py:222-263`) never touches it. **U4 prerequisite**: the web UI will need a
+        progress signal during VALIDATE, which does not currently exist.
+      - `progress.json`'s `frame_path` stays `null` for the whole run: `ProgressReporter.set_frame()`
+        is never called by the orchestrator (only `update_step()` is). `current_frame.pdb` is
+        published correctly regardless, so FR-17 works — but **U4 prerequisite**: anything reading
+        the preview path off `progress.json` will get `null` until `set_frame()` is wired in.
+
+      Verification artifacts prepared 2026-08-13:
       - `scripts/m1-prepare-run.sh` — builds a run directory + minimal `run.json` (an 80-residue
         de novo `DesignMode.FREE` smoke test, `--stage all`), validated locally against the real
         `rfd_core.RunRecord` model (Python 3.9.25) before being written to disk
@@ -659,10 +682,11 @@ Workflow Planning and favours skipping optional stages.
 *(Corrected 2026-08-13 — U2b Runner code generation approved; Milestone M1 verification artifacts
 prepared and awaiting execution on real Grex hardware.)*
 - **Lifecycle Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: **Milestone M1 — blocked on real Grex GPU execution.** U1 + U2a + U2b are all
-  code-complete and approved. This is the gate: it requires the user to run a hand-written `sbatch`
-  job on a real Grex login/GPU node, which this environment cannot do itself. **Seven attempts so
-  far, seven different root causes found and fixed, the seventh not yet re-verified**: (1, job
+- **Current Stage**: **Milestone M1 — ✅ PASSED 2026-08-27 (job 7556085, real V100, 00:01:27).**
+  U1 + U2a + U2b are code-complete, approved, and now proven to work together on real Grex
+  hardware. The gate is cleared and **U3 is unblocked.** It took **seven real executions and seven
+  distinct root causes**, every one found from primary sources (pinned upstream source, PyPI
+  metadata, JAX's own changelog and `_cuda_path()` implementation) rather than guessed: (1, job
   7441234) `pydantic` missing — fixed, rebuild (job 7441239) confirmed it; (2, job 7441266)
   `dm-haiku==0.0.12` imports `jax.extend`, incompatible with the CUDA-11.6-mandated `jax==0.4.7`
   ceiling — fixed by downgrading to `dm-haiku==0.0.10`, rebuild confirmed it; (3, job 7442555)
@@ -686,26 +710,42 @@ prepared and awaiting execution on real Grex hardware.)*
   which is why `.err` held only that one line. Fixed by adopting the engine detection that
   `build-image.sh`/`verify-image.sh`/`preflight-grex.sh` already used, and fixed at source in
   `deployment-architecture.md` section 3's template so U3's JobScriptGenerator does not regenerate
-  the same bug into every future job script. Verified against a fake engine (four scenarios);
-  not yet re-run on Grex. **Round 6's ptxas fix has not yet had a real test — round 7 never
-  reached the GPU.**
+  the same bug into every future job script. **Round 8 (job 7556085) then passed end to end**,
+  which also gave round 6's ptxas fix its first real test — VALIDATE completed, confirming
+  `nvidia-cuda-nvcc-cu11==11.7.99` closed the XLA/ptxas failure.
+
+  **Pattern worth carrying into U3/U4**: six of the seven root causes were version-ceiling
+  collisions forced by the CUDA 11.6.2 base image (`torch==1.12.1+cu116` → `jax==0.4.7` →
+  everything downstream). The seventh was different in kind — a hardcoded assumption in a script
+  that no test covered — and it was the only one that cost a GPU allocation to discover something
+  not GPU-dependent at all. U3's JobScriptGenerator should be unit-testable against a fake engine
+  for exactly this reason.
 - **Completed**: U1 Code Generation and verification (2026-08-06/07, six rounds — three CPU, one
   GPU risk-materialization, one build-time resolver failure, one final GPU confirmation), U2a Core
   Domain (157 tests, 100% coverage, real Python 3.9.25), U2b Runner Functional Design and Code
   Generation (74 tests, real Python 3.9.25, zero ColabDesign/torch/JAX installed) — **APPROVED
   2026-08-13**
-- **Next Stage**: **Milestone M1** — the user runs `bash scripts/m1-prepare-run.sh` then
-  `sbatch scripts/m1-submit.sh <run_dir>` on a Grex login node (full instructions:
-  `docs/m1-verification.md`), then reports the `sacct`/job-log output back so it can be checked
-  against the 5 exit criteria in unit-of-work.md. Only after M1 passes does AI-DLC proceed to U3.
-- **Status**: **U1 is done.** FR-16/FR-17 confirmed achievable (sokrypton fork on PYTHONPATH,
-  `dump_pdb` present); the §3 risk this project carried since infrastructure design (`jaxlib 0.4.25`
-  needing CUDA ≥ 11.8 against an 11.6.2 base) materialized, was root-caused via JAX's changelog, and
-  is now closed — `jax==0.4.7` / `jaxlib==0.4.7+cuda11.cudnn86` / `chex==0.1.82` / `optax==0.1.7`
-  verified on a real NVIDIA A30. Tier 2 (§3, two images) was never needed. **U2a and U2b are both
-  code-complete and approved. Milestone M1 verification artifacts are prepared; execution is
-  pending Grex GPU access.**
-- **Next milestone**: **M1** — a real design via hand-written `sbatch` on a Grex GPU node
+- **Next Stage**: **U3** — the milestone that gated it (M1) passed on 2026-08-27. Per
+  unit-of-work.md, U3 is the Slurm/job-orchestration unit whose `JobScriptGenerator` (C-23) emits
+  the job script `scripts/m1-submit.sh` is the hand-written instance of. Entering U3 starts with
+  its CONSTRUCTION stages (Functional Design onward) and requires user approval at each, per the
+  workflow. **Carry into U3 from M1**: (a) the engine-name detection fix is already in
+  `deployment-architecture.md` section 3's template, so the generator must emit detection rather
+  than a hardcoded binary name; (b) `JobScriptGenerator` should be unit-testable against a fake
+  engine — round 7's bug was invisible to every existing test and cost a GPU allocation to find.
+- **Status**: **U1, U2a, U2b are all done and proven together on real hardware (M1 passed
+  2026-08-27, job 7556085).** FR-16/FR-17 confirmed achievable and now confirmed working
+  (sokrypton fork on PYTHONPATH, `dump_pdb` present, `current_frame.pdb` published during a real
+  run); the §3 risk this project carried since infrastructure design (`jaxlib 0.4.25` needing
+  CUDA ≥ 11.8 against an 11.6.2 base) materialized, was root-caused via JAX's changelog, and is
+  closed — `jax==0.4.7` / `jaxlib==0.4.7+cuda11.cudnn86` / `chex==0.1.82` / `optax==0.1.7` /
+  `nvidia-cuda-nvcc-cu11==11.7.99` verified on a real A30 and now a real V100 end to end. Tier 2
+  (§3, two images) was never needed.
+- **Next milestone**: **M2** (post-U3) — M1 is passed. Note M1's scope limits still stand and are
+  NOT yet covered by any real run: `DesignMode.FIXED`/`PARTIAL` template resolution, AnAnaS /
+  `symmetry=auto`, and `--stage backbone`/`--stage validate` used independently. Worth a manual
+  spot-check before U4 exposes them through the web form (`docs/m1-verification.md`, "Known scope
+  limits").
 
 ### OPERATIONS PHASE
 - [ ] Operations - PLACEHOLDER
