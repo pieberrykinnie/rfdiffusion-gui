@@ -1,13 +1,29 @@
 {% extends "base.html" %}
 
-{% block title %}New Run - RFdiffusion GUI{% endblock %}
+{% block title %}Submit RFdiffusion Run - RFdiffusion GUI{% endblock %}
 
 {% block content %}
-<h1>Create New Run</h1>
+<div class="form-header" style="margin-bottom: 2rem;">
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+        <div>
+            <h1 style="margin-bottom: 0.25rem; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                RFdiffusion Design Submission
+            </h1>
+            <p style="color: var(--text-muted); font-size: 0.95rem;">
+                Structure generation with or without conditional information (monomer, binder, scaffolding, partial diffusion, symmetry).
+                Based on the <a href="https://colab.research.google.com/github/sokrypton/ColabDesign/blob/main/rf/examples/diffusion.ipynb" target="_blank" style="color: var(--accent-blue);">official RFdiffusion notebook</a>.
+            </p>
+        </div>
+        <a href="/help/contigs" target="_blank" class="btn btn-secondary" data-testid="link-contig-help">
+            📖 Contig Syntax Guide
+        </a>
+    </div>
+</div>
 
 {% if errors %}
 <div class="alert alert-danger" data-testid="validation-errors">
-    <ul>
+    <h4 style="margin-bottom: 0.5rem; font-weight: 700;">Validation Errors</h4>
+    <ul style="padding-left: 1.25rem;">
     {% for error in errors %}
         <li>{{ error }}</li>
     {% endfor %}
@@ -16,143 +32,274 @@
 {% endif %}
 
 <form action="/runs" method="post" enctype="multipart/form-data">
+    <!-- Section 1: Backbone Generation -->
     <fieldset>
-        <legend>Basic Settings</legend>
+        <legend>🧬 RFdiffusion Backbone Generation</legend>
+        
         <div class="form-group">
-            <label for="name">Run Name</label>
-            <input type="text" id="name" name="name" required data-testid="input-name">
+            <label for="name">Run Name *</label>
+            <input type="text" id="name" name="name" required placeholder="e.g. binder_test_1" data-testid="input-name">
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Unique identifier for your outputs archive</span>
         </div>
 
-        <div class="form-group">
-            <label for="contigs">Contigs <a href="/help/contigs" target="_blank" data-testid="link-contig-help">(Help)</a></label>
+        <div class="form-group full-width">
+            <label for="contigs">
+                Contigs * 
+                <span style="font-size: 0.75rem; color: var(--accent-blue); font-weight: normal;">(e.g., <code>100</code>, <code>A:50</code>, <code>40/A163-181/40</code>)</span>
+            </label>
             <input type="text" id="contigs" name="contigs" required 
+                   placeholder="100"
                    hx-post="/api/preview-mode" 
                    hx-target="#mode-preview" 
-                   hx-trigger="keyup changed delay:500ms"
+                   hx-trigger="keyup changed delay:300ms"
                    data-testid="input-contigs">
-            <div id="mode-preview" data-testid="mode-preview"></div>
+            
+            <div id="mode-preview" style="margin-top: 0.5rem;" data-testid="mode-preview"></div>
+            
+            <!-- Quick Preset Pills -->
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; align-items: center;">
+                <span style="font-size: 0.75rem; color: var(--text-muted);">Quick Presets:</span>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('contigs').value='100'; htmx.trigger('#contigs', 'keyup');">Monomer (100)</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('contigs').value='A:50'; htmx.trigger('#contigs', 'keyup');">Binder (A:50)</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('contigs').value='40/A163-181/40'; htmx.trigger('#contigs', 'keyup');">Scaffold Loop</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('contigs').value='A1-10'; htmx.trigger('#contigs', 'keyup');">Partial Noise</button>
+            </div>
         </div>
 
         <div class="form-group">
             <label for="pdb_file">Template PDB File (Optional)</label>
             <input type="file" id="pdb_file" name="pdb_file" accept=".pdb" data-testid="input-pdb-file">
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Upload target/motif PDB structure</span>
         </div>
         
         <div class="form-group">
-            <label for="hotspots">Hotspots (e.g., A10,A12,A15)</label>
-            <input type="text" id="hotspots" name="hotspots" data-testid="input-hotspots">
+            <label for="hotspots">Hotspot Residues (Optional)</label>
+            <input type="text" id="hotspots" name="hotspots" placeholder="e.g. A10,A12,A15" data-testid="input-hotspots">
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Target binding interface residues</span>
         </div>
 
         <div class="form-group">
-            <label for="iterations">Iterations</label>
-            <input type="number" id="iterations" name="iterations" value="50" min="1" max="200" data-testid="input-iterations">
+            <label for="iterations">Iterations (Denoising Steps)</label>
+            <select id="iterations" name="iterations" data-testid="input-iterations">
+                <option value="25">25 (Fast draft)</option>
+                <option value="50" selected>50 (Standard default)</option>
+                <option value="100">100 (High quality)</option>
+                <option value="150">150</option>
+                <option value="200">200 (Maximum refinement)</option>
+            </select>
         </div>
 
         <div class="form-group">
             <label for="num_designs">Number of Designs</label>
-            <input type="number" id="num_designs" name="num_designs" value="1" min="1" data-testid="input-num-designs">
-        </div>
-    </fieldset>
-
-    <fieldset>
-        <legend>Symmetry</legend>
-        <div class="form-group">
-            <label for="symmetry_kind">Kind</label>
-            <select id="symmetry_kind" name="symmetry_kind" data-testid="select-symmetry-kind">
-                <option value="none" selected>None</option>
-                <option value="auto" {% if not ananas_available %}disabled{% endif %}>Auto {% if not ananas_available %}(Requires Ananas){% endif %}</option>
-                <option value="cyclic">Cyclic</option>
-                <option value="dihedral">Dihedral</option>
+            <select id="num_designs" name="num_designs" data-testid="input-num-designs">
+                <option value="1" selected>1</option>
+                <option value="2">2</option>
+                <option value="4">4</option>
+                <option value="8">8</option>
+                <option value="16">16</option>
+                <option value="32">32</option>
             </select>
-        </div>
-        <div class="form-group">
-            <label for="symmetry_order">Order (1-12)</label>
-            <input type="number" id="symmetry_order" name="symmetry_order" value="1" min="1" max="12" data-testid="input-symmetry-order">
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Number of independent backbones to generate</span>
         </div>
     </fieldset>
 
+    <!-- Section 2: Symmetry Settings -->
     <fieldset>
-        <legend>Advanced Parameters</legend>
+        <legend>❄️ Symmetry Settings</legend>
+        
         <div class="form-group">
-            <label for="chains">Chains to Diffuse</label>
-            <input type="text" id="chains" name="chains" data-testid="input-chains">
+            <label for="symmetry_kind">Symmetry Kind</label>
+            <select id="symmetry_kind" name="symmetry_kind" data-testid="select-symmetry-kind">
+                <option value="none" selected>None (Standard monomer / heteromer)</option>
+                <option value="auto" {% if not ananas_available %}disabled{% endif %}>Auto-detect {% if not ananas_available %}(Requires AnAnaS binary){% endif %}</option>
+                <option value="cyclic">Cyclic (Cn)</option>
+                <option value="dihedral">Dihedral (Dn)</option>
+            </select>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Auto symmetry uses AnAnaS detector</span>
         </div>
-        <div class="form-group">
-            <label><input type="checkbox" name="add_potential" data-testid="checkbox-add-potential"> Add Potential</label>
-        </div>
-        <div class="form-group">
-            <label for="partial_T">Partial T (1-200)</label>
-            <input type="number" id="partial_T" name="partial_T" data-testid="input-partial-t">
-        </div>
-        <div class="form-group">
-            <label><input type="checkbox" name="use_beta_model" data-testid="checkbox-use-beta-model"> Use Beta Model</label>
-        </div>
-        <div class="form-group">
-            <label><input type="checkbox" name="live_preview" data-testid="checkbox-live-preview"> Live Preview</label>
-        </div>
-    </fieldset>
 
-    <fieldset>
-        <legend>Validation Parameters</legend>
         <div class="form-group">
-            <label for="num_seqs">Number of Sequences</label>
-            <input type="number" id="num_seqs" name="num_seqs" value="8" min="1" data-testid="input-num-seqs">
-        </div>
-        <div class="form-group">
-            <label for="mpnn_sampling_temp">MPNN Sampling Temp</label>
-            <input type="number" step="0.1" id="mpnn_sampling_temp" name="mpnn_sampling_temp" value="0.1" data-testid="input-mpnn-temp">
-        </div>
-        <div class="form-group">
-            <label for="rm_aa">Remove Amino Acids (e.g., C)</label>
-            <input type="text" id="rm_aa" name="rm_aa" data-testid="input-rm-aa">
-        </div>
-        <div class="form-group">
-            <label><input type="checkbox" name="use_soluble_mpnn" data-testid="checkbox-soluble-mpnn"> Use Soluble MPNN</label>
-        </div>
-        <div class="form-group">
-            <label><input type="checkbox" name="initial_guess" data-testid="checkbox-initial-guess"> Initial Guess</label>
-        </div>
-        <div class="form-group">
-            <label for="num_recycles">Number of Recycles (AlphaFold)</label>
-            <input type="number" id="num_recycles" name="num_recycles" value="3" min="1" data-testid="input-num-recycles">
-        </div>
-        <div class="form-group">
-            <label><input type="checkbox" name="use_multimer" data-testid="checkbox-use-multimer"> Use Multimer (AlphaFold)</label>
-        </div>
-    </fieldset>
-
-    <fieldset>
-        <legend>Slurm Parameters</legend>
-        <div class="form-group">
-            <label for="slurm_partition">Partition</label>
-            <select id="slurm_partition" name="slurm_partition" data-testid="select-slurm-partition">
-                {% for partition in partitions %}
-                    <option value="{{ partition.name }}">{{ partition.name }}{% if not partition.compatible %} (Incompatible){% endif %}</option>
+            <label for="symmetry_order">Symmetry Order (1-12)</label>
+            <select id="symmetry_order" name="symmetry_order" data-testid="input-symmetry-order">
+                {% for o in range(1, 13) %}
+                <option value="{{ o }}" {% if o == 1 %}selected{% endif %}>{{ o }}</option>
                 {% endfor %}
             </select>
         </div>
+
         <div class="form-group">
-            <label for="slurm_account">Account</label>
-            <input type="text" id="slurm_account" name="slurm_account" data-testid="input-slurm-account">
+            <label for="chains">Filter Chains (Optional)</label>
+            <input type="text" id="chains" name="chains" placeholder="e.g. A,B" data-testid="input-chains">
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Filters input PDB to these chains before symmetry detection</span>
         </div>
+
+        <div class="form-group" style="justify-content: flex-end;">
+            <label style="cursor: pointer; font-size: 0.9rem;">
+                <input type="checkbox" name="add_potential" checked data-testid="checkbox-add-potential"> 
+                Add Guiding Contact Potentials
+            </label>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Discourages steric clashes between symmetric sub-chains</span>
+        </div>
+    </fieldset>
+
+    <!-- Section 3: Advanced Settings -->
+    <fieldset>
+        <legend>⚙️ Advanced RFdiffusion Settings</legend>
+        
         <div class="form-group">
-            <label for="slurm_walltime">Walltime</label>
+            <label for="partial_T">Partial Diffusion Steps (partial_T)</label>
+            <select id="partial_T" name="partial_T" data-testid="input-partial-t">
+                <option value="auto" selected>auto (Proportional to iterations)</option>
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="40">40</option>
+                <option value="60">60</option>
+                <option value="80">80</option>
+            </select>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Number of noising steps for partial diffusion protocol</span>
+        </div>
+
+        <div class="form-group" style="justify-content: center;">
+            <label style="cursor: pointer; font-size: 0.9rem;">
+                <input type="checkbox" name="use_beta_model" data-testid="checkbox-use-beta-model"> 
+                Use Beta Model Weights
+            </label>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Switch to beta params for better SSE balance if seeing excess helices</span>
+        </div>
+
+        <div class="form-group" style="justify-content: center;">
+            <label style="cursor: pointer; font-size: 0.9rem;">
+                <input type="checkbox" name="live_preview" checked data-testid="checkbox-live-preview"> 
+                Enable Live 3D Stream Preview
+            </label>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Streams intermediate denoising frames to the browser in real time</span>
+        </div>
+    </fieldset>
+
+    <!-- Section 4: ProteinMPNN & AlphaFold Validation -->
+    <fieldset>
+        <legend>🧪 ProteinMPNN Sequence Design & AlphaFold Validation</legend>
+        
+        <div class="form-group">
+            <label for="num_seqs">ProteinMPNN Sequences / Design</label>
+            <select id="num_seqs" name="num_seqs" data-testid="input-num-seqs">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="4">4</option>
+                <option value="8" selected>8 (Standard default)</option>
+                <option value="16">16</option>
+                <option value="32">32</option>
+                <option value="64">64</option>
+            </select>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Number of amino acid sequences to sample per backbone</span>
+        </div>
+
+        <div class="form-group">
+            <label for="mpnn_sampling_temp">MPNN Sampling Temperature</label>
+            <select id="mpnn_sampling_temp" name="mpnn_sampling_temp" data-testid="input-mpnn-temp">
+                <option value="0.0001">0.0001 (Deterministic / argmax)</option>
+                <option value="0.1" selected>0.1 (Standard default)</option>
+                <option value="0.15">0.15</option>
+                <option value="0.2">0.2</option>
+                <option value="0.25">0.25</option>
+                <option value="0.3">0.3 (More diverse)</option>
+                <option value="0.5">0.5</option>
+                <option value="1.0">1.0 (Maximum entropy)</option>
+            </select>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Higher temperature = more diverse sequence sampling</span>
+        </div>
+
+        <div class="form-group">
+            <label for="rm_aa">Remove Amino Acids (Forbidden AAs)</label>
+            <input type="text" id="rm_aa" name="rm_aa" value="C" placeholder="C" data-testid="input-rm-aa">
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Excluded residues (default 'C' to avoid Cysteines)</span>
+        </div>
+
+        <div class="form-group">
+            <label for="num_recycles">AlphaFold Recycles</label>
+            <select id="num_recycles" name="num_recycles" data-testid="input-num-recycles">
+                <option value="0">0</option>
+                <option value="1">1 (Fast screening)</option>
+                <option value="2">2</option>
+                <option value="3" selected>3 (Recommended for binder design)</option>
+                <option value="6">6</option>
+                <option value="12">12</option>
+            </select>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Recycle passes for AlphaFold structural validation</span>
+        </div>
+
+        <div class="form-group" style="justify-content: center;">
+            <label style="cursor: pointer; font-size: 0.9rem;">
+                <input type="checkbox" name="use_soluble_mpnn" data-testid="checkbox-soluble-mpnn"> 
+                Use Soluble MPNN Weights
+            </label>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Weights trained exclusively on soluble proteins</span>
+        </div>
+
+        <div class="form-group" style="justify-content: center;">
+            <label style="cursor: pointer; font-size: 0.9rem;">
+                <input type="checkbox" name="initial_guess" data-testid="checkbox-initial-guess"> 
+                AlphaFold Initial Guess
+            </label>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Soft initialization with target coordinates (recommended for binders)</span>
+        </div>
+
+        <div class="form-group" style="justify-content: center;">
+            <label style="cursor: pointer; font-size: 0.9rem;">
+                <input type="checkbox" name="use_multimer" data-testid="checkbox-use-multimer"> 
+                Use AlphaFold Multimer v3
+            </label>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Uses AlphaFold Multimer weights for complex prediction</span>
+        </div>
+    </fieldset>
+
+    <!-- Section 5: Slurm Execution Cluster (Grex) -->
+    <fieldset>
+        <legend>🖥️ Slurm Execution Cluster (Grex)</legend>
+        
+        <div class="form-group">
+            <label for="slurm_partition">Slurm Partition *</label>
+            <select id="slurm_partition" name="slurm_partition" data-testid="select-slurm-partition">
+                {% for partition in partitions %}
+                    <option value="{{ partition.name }}" {% if partition.name == config.default_partition %}selected{% endif %}>
+                        {{ partition.name }}{% if not partition.compatible %} (Incompatible){% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="slurm_account">Allocation Account (Optional)</label>
+            <input type="text" id="slurm_account" name="slurm_account" placeholder="e.g. def-cardona" data-testid="input-slurm-account">
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Slurm allocation account on Grex</span>
+        </div>
+
+        <div class="form-group">
+            <label for="slurm_walltime">Walltime Limit</label>
             <input type="text" id="slurm_walltime" name="slurm_walltime" value="02:00:00" data-testid="input-slurm-walltime">
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Format: HH:MM:SS or D-HH:MM:SS</span>
         </div>
+
         <div class="form-group">
-            <label for="slurm_gpus">GPUs</label>
+            <label for="slurm_gpus">GPU Count</label>
             <input type="number" id="slurm_gpus" name="slurm_gpus" value="1" min="0" data-testid="input-slurm-gpus">
         </div>
+
         <div class="form-group">
             <label for="slurm_cpus_per_task">CPUs per Task</label>
             <input type="number" id="slurm_cpus_per_task" name="slurm_cpus_per_task" value="2" min="1" data-testid="input-slurm-cpus">
         </div>
+
         <div class="form-group">
             <label for="slurm_mem_per_cpu">Memory per CPU</label>
             <input type="text" id="slurm_mem_per_cpu" name="slurm_mem_per_cpu" value="4G" data-testid="input-slurm-mem">
         </div>
     </fieldset>
 
-    <button type="submit" class="btn btn-primary" data-testid="btn-submit-run">Submit Run</button>
+    <div style="margin-top: 1.5rem; text-align: right;">
+        <button type="submit" class="btn btn-primary" style="font-size: 1.1rem; padding: 0.85rem 2rem;" data-testid="btn-submit-run">
+            🚀 Launch RFdiffusion Run
+        </button>
+    </div>
 </form>
 {% endblock %}
