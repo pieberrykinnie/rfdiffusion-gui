@@ -6,6 +6,7 @@ requires-python = "==3.9.*"
 members = [
     "rfd-core",
     "rfd-runner",
+    "rfd-web",
 ]
 
 [[package]]
@@ -182,6 +183,25 @@ dev = [
 name = "rfd-runner"
 version = "0.1.0"
 source = { editable = "packages/rfd-runner" }
+dependencies = [
+    { name = "rfd-core" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "rfd-core", editable = "packages/rfd-core" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
+
+[[package]]
+name = "rfd-web"
+version = "0.1.0"
+source = { editable = "packages/rfd-web" }
 dependencies = [
     { name = "rfd-core" },
 ]

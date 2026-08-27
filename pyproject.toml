@@ -5,7 +5,14 @@ members = ["packages/*"]
 # itself an installable package, just a container for rfd-core, rfd-runner,
 # and rfd-web (DD-1, Application Design Q1=A).
 #
-# rfd-core targets Python 3.9 (the container's interpreter, per U1); rfd-web
-# targets >=3.11 (the login node's system python3 is 3.6.8, unusable -- see
-# docs/setup.md). uv resolves each package's own environment independently;
-# use `uv run --package <name> --python <ver> ...` to be explicit.
+# ALL THREE packages target Python 3.9 (the container's interpreter, per U1).
+#
+# Corrected 2026-08-27 (U3 Code Generation Step 1): this comment previously claimed
+# rfd-web targets >=3.11 and that "uv resolves each package's own environment
+# independently". Both are wrong. A uv workspace has ONE lockfile and one
+# requires-python intersection, and `uv lock` refuses a workspace whose members
+# disagree. More fundamentally, rfd-web depends on rfd-core, which is capped at
+# <3.10 so it can import inside the container -- so any environment that can import
+# rfd-core is a 3.9 environment, login node included. rfd-web at >=3.11 was never
+# installable. The login node's SYSTEM python3 (3.6.8) is indeed unusable; uv
+# supplies 3.9 there, as docs/setup.md describes.

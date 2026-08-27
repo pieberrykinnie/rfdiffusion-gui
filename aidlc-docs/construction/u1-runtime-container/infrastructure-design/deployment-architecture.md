@@ -66,7 +66,7 @@ every fifth step to shared storage, staging full outputs out at the end.
 |---|---|---|---|
 | `$RFD_PROJECT_ROOT` | `/opt/rfdgui` | ro | `rfd-core` + `rfd-runner` source (DD-2) |
 | `$RFD_WEIGHTS` | `/opt/weights` | ro | checkpoints, AlphaFold params, `ananas` |
-| `$RFD_OUTPUT_ROOT` | `/opt/outputs` | rw | run directories |
+| `$RFD_OUTPUT_ROOT/{run_id}` | `/opt/outputs/run` | rw | **the one run directory this job owns** -- corrected 2026-08-27 from binding the whole output root; a job has no reason to see other runs, and this is what M1 actually ran with |
 | `$TMPDIR` | `/scratch` | rw | per-step dumps (G-11) |
 
 Source and weights are **read-only** — the job has no reason to modify either, and a read-only mount
@@ -94,13 +94,20 @@ the run directory** so every run is inspectable and hand-resubmittable (G-2).
 {account_line}
 # NOTE: --qos is deliberately never emitted (Grex docs: "Not to be used on Grex!")
 
-cd ${SLURM_SUBMIT_DIR}
+# Deliberately no `set -e`: the exec below must be allowed to fail so its exit
+# code can be captured into `rc` and reported through sacct (see the note below).
+set -u
 
-echo "Starting run at: `date`"
-echo "Job ID: ${SLURM_JOB_ID} on host: `hostname`"
+cd "${SLURM_SUBMIT_DIR:-{run_dir}}"
 
-# Grex sets TMPDIR; CCEnv scripts may expect SLURM_TMPDIR
+echo "Starting run at: $(date)"
+echo "Job ID: ${SLURM_JOB_ID:-none} on host: $(hostname)"
+
+# Grex sets TMPDIR; CCEnv scripts may expect SLURM_TMPDIR. The bind source must
+# exist or the engine refuses to start; Slurm normally creates it itself.
+export TMPDIR=${TMPDIR:-/tmp}
 export SLURM_TMPDIR=$TMPDIR
+mkdir -p "$TMPDIR"
 export APPTAINER_CACHEDIR={cache_dir}
 export SINGULARITY_CACHEDIR={cache_dir}
 
@@ -109,25 +116,49 @@ export SINGULARITY_CACHEDIR={cache_dir}
 # detected, not assumed. Assuming `apptainer` is what killed M1 job 7556080
 # with exit 127 before this note existed.
 module load singularity 2>/dev/null || module load apptainer 2>/dev/null || true
-ENGINE=$(command -v singularity || command -v apptainer)
+ENGINE=$(command -v singularity || command -v apptainer || true)
+if [ -z "$ENGINE" ]; then
+  echo "ERROR: no singularity/apptainer on PATH after module load (G-15)" >&2
+  exit 127
+fi
+echo "Engine: $ENGINE ($($ENGINE --version 2>&1))"
+
+# Fail before the exec rather than inside it, so a missing prerequisite reports
+# itself by name instead of surfacing as an opaque non-zero rc from the runner.
+for p in {image_path} {run_dir}/run.json; do
+  [ -f "$p" ] || { echo "ERROR: required path missing: $p" >&2; exit 2; }
+done
+[ -d {weights_root} ] || { echo "ERROR: weights dir missing: {weights_root}" >&2; exit 2; }
 
 nvidia-smi
 
-$ENGINE exec --nv \
+"$ENGINE" exec --nv \
   --bind {project_root}:/opt/rfdgui:ro \
   --bind {weights_root}:/opt/weights:ro \
-  --bind {output_root}:/opt/outputs \
-  --bind ${TMPDIR}:/scratch \
+  --bind {run_dir}:/opt/outputs/run \
+  --bind "$TMPDIR":/scratch \
   {image_path} \
-  python3.9 -m rfd_runner \
-    --run-dir /opt/outputs/{run_id} \
-    --scratch /scratch \
-    --stage {stage}
+  /app/RFdiffusion/.venv/bin/python -m rfd_runner /opt/outputs/run --stage {stage}
 
 rc=$?
-echo "Job finished with exit code $rc at: `date`"
+echo "Job finished with exit code $rc at: $(date)"
 exit $rc
 ```
+
+**Corrected 2026-08-27 (U3 Functional Design, Q2=A).** The earlier version of this template invoked
+`python3.9 -m rfd_runner --run-dir … --scratch …` and bound `{output_root}` at `/opt/outputs`.
+None of that could have worked: the shipped runner CLI
+(`packages/rfd-runner/src/rfd_runner/__main__.py`) takes a **positional** `run_dir` and accepts only
+`--stage` — there is no `--run-dir` and no `--scratch` (scratch is `OrchestratorDeps.dump_dir`, fixed
+at `/scratch` inside the container) — and the container's interpreter is
+`/app/RFdiffusion/.venv/bin/python` (`containers/rfdiffusion.def:467`), not a `python3.9` on `PATH`.
+The template above is now the shape of `scripts/m1-submit.sh`, the only version with a successful
+real execution behind it (M1, job 7556085), with two deliberate differences from that hand-written
+script: logs are written **into the run directory** (`{run_dir}/job-%j.{out,err}`) so
+`RunDirectoryReader` can find them for FR-19, and `{run_dir}` is interpolated literally rather than
+taken as `$1`, so a generated script is resubmittable with a bare `sbatch job.sh` (G-2).
+Binding only the single run directory, rather than the whole output root, is also kept from the M1
+script: a job has no reason to see other runs.
 
 ### Grex conformance
 
@@ -141,10 +172,10 @@ exit $rc
 | G-6 explicit partition | `--partition={partition}` always present |
 | G-7 one GPU default | `gpus` defaults to 1 |
 | G-8 6 CPUs / 6 GB per CPU | defaults `--cpus-per-task=6`, `--mem-per-cpu=6000M` |
-| G-11 `$TMPDIR` scratch | bound to `/scratch`, passed as `--scratch` |
+| G-11 `$TMPDIR` scratch | bound to `/scratch`, which is the runner's fixed in-container dump dir |
 | G-12 `SLURM_TMPDIR` | `export SLURM_TMPDIR=$TMPDIR` |
 | G-13 stage out | runner stages before exit; `$TMPDIR` discarded by Slurm |
-| G-15 module | `module load singularity` |
+| G-15 module | `module load singularity \|\| module load apptainer`, then `command -v` detection -- the binary name is never assumed (M1 job 7556080) |
 | G-16 image pre-built | `{image_path}` staged beforehand; never pulled at job start |
 | G-17 `--nv` | present |
 | G-18 cache dir | both `APPTAINER_` and `SINGULARITY_` set |

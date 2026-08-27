@@ -5,9 +5,14 @@
 - **Project Type**: Brownfield
 - **Start Date**: 2026-07-30T22:57:31Z
 - **Current Phase**: **CONSTRUCTION** (INCEPTION complete and fully approved)
-- **Current Stage**: **U1 fully verified on real GPU hardware (PASS 13/FAIL 0, 2026-08-07)**.
-  **U2a Core Domain COMPLETE and APPROVED**. **U2b Runner Functional Design APPROVED and Code
-  Generation COMPLETE (2026-08-13)** — 74 tests, 97% coverage, awaiting user review/approval
+- **Current Stage**: **U3 Slurm and Persistence — Code Generation COMPLETE 2026-08-27, awaiting
+  user approval.** Functional Design approved, the 20-step code-generation plan approved, and all
+  43 plan checkboxes ticked. `packages/rfd-web` now exists: **225 tests, 96% coverage, on real
+  Python 3.9.25**, with the pre-existing 231 (`rfd-core` 157 + `rfd-runner` 74) re-run and
+  unchanged — **456 total**. Summary at
+  `aidlc-docs/construction/u3-slurm-persistence/code/u3-code-summary.md`. U1 (PASS 13/FAIL 0, 2026-08-07),
+  U2a and U2b are complete and approved, and **Milestone M1 PASSED 2026-08-27** on real Grex
+  hardware (job 7556085), which is what unblocked U3.
 
 ## ✅ U1 Verification — First Real Execution (2026-08-06, node `n339`)
 
@@ -672,8 +677,77 @@ Workflow Planning and favours skipping optional stages.
         `run_dir`, or the existing one — `RunRecord` is idempotent, and `backbone_state` is already
         `completed` so a re-run should proceed straight to VALIDATE) and report back — checking
         `run.json` first if `.err` is empty again, per the 5th-round finding.
-- [ ] U3 Slurm Integration and Persistence: Functional Design **EXECUTE** → Code Generation **EXECUTE**
-      (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
+- [ ] U3 Slurm Integration and Persistence: Functional Design **DONE** → Code Generation **DONE**
+      2026-08-27 (NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
+      — *awaiting user approval of Code Generation*
+      - **Code Generation COMPLETE 2026-08-27** — `packages/rfd-web`, the third and final workspace
+        package. **225 tests, 96% coverage, real Python 3.9.25**; `rfd-core` (157) and `rfd-runner`
+        (74) re-run unchanged, **456 total**. Everything is verified locally, as
+        `unit-of-work.md` promised for this unit ("testable without cluster: with fake Slurm"):
+        real SQLite files in `tmp_path`, real directories, real `bash`, real subprocesses against
+        stub Slurm binaries on `PATH`. **The generated job script is EXECUTED under bash against a
+        stub engine** across the same four scenarios M1's round-7 fix was verified against (only
+        `singularity`; only `apptainer`; neither → exit 127 with the G-15 message; missing
+        `run.json` → exit 2 with the engine provably never invoked) — the M1 lesson that a
+        hardcoded binary name is invisible to any test that merely reads the script. G-1…G-18 are
+        asserted rule by rule, and every row of the S-2 reconciliation table has its own test,
+        including BR-2 (Slurm `COMPLETED` + non-finalised `run.json` ⇒ **FAILED**, never a false
+        success) and BR-3 (a terminal run issues **zero** further Slurm calls, proven by call
+        counting). Artifacts: `packages/rfd-web/` (18 source modules, 1023 statements, 14 test
+        files), `env.example` (+6 variables), summary at
+        `aidlc-docs/construction/u3-slurm-persistence/code/u3-code-summary.md`.
+      - **⚠ One correction made during generation (Step 1): `rfd-web` cannot target Python ≥ 3.11.**
+        The plan, `domain-entities.md` §8, and the root `pyproject.toml`'s own comment (written in
+        U2a) all said it did; `uv lock` refused outright. The deeper reason is not a uv quirk —
+        `rfd-web` depends on `rfd-core`, which is capped below 3.10 so it can import inside the U1
+        container, so **any** environment able to import `rfd-core` is a 3.9 environment, the login
+        node included. A 3.11 `rfd-web` was never installable. Keeping it would have required
+        making `rfd-web` a standalone project with its own lockfile, breaking DD-1's approved "uv
+        workspace, three packages". Corrected in all four places; the package targets
+        `>=3.9,<3.10` and carries the same `UP045`/`UP007` ruff ignore as its siblings.
+      - **Not proven, and stated plainly**: no real Slurm was contacted (stub binaries emitting real
+        Slurm output formats prove the parsing and the argument lists, not that Grex emits those
+        exact strings); no generated job has been submitted; `sinfo`'s real column content on Grex
+        is unverified (a mismatch degrades discovery to a free-text partition field, not an outage);
+        `squeue`/`sacct`/`scancel` error-string matching is based on documented Slurm messages.
+      - **Functional Design APPROVED 2026-08-27.** Part 1 (plan + 8
+        questions) and Part 2 (artifact generation) both done in one session; the user answered
+        **A to all 8 questions** — no ambiguity, no follow-ups. Artifacts at
+        `aidlc-docs/construction/u3-slurm-persistence/functional-design/`:
+        `business-logic-model.md`, `business-rules.md` (BR-1 … BR-23), `domain-entities.md`.
+        Settled by those answers: S-1 `SubmissionService` is built **in U3** minus the browser
+        upload (Q1=A), so U3's definition of done is actually reachable; `JobScriptGenerator`
+        emits the **M1-proven** script shape rather than the broken section-3 template (Q2=A);
+        partitions are discovered and **annotated**, never filtered, with incompatibility driven by
+        `RFD_INCOMPATIBLE_PARTITIONS` config rather than code (Q3=A); run ids are sanitised names
+        with a random suffix on collision, using `mkdir(exist_ok=False)` as the race-free collision
+        test (Q4=A); SQLite is rebuilt from run directories at startup (Q5=A); `CANCELLED` from
+        Slurm suppresses the runner's misleading walltime message and `cancel_requested_at` is
+        recorded (Q6=A); `log_tail` reads `.err` first, falling back to `.out` (Q7=A);
+        `resubmit(run_id, stage)` exists and writes `job-validate.sh` alongside `job.sh`, giving
+        FR-11 its first caller (Q8=A).
+      - **`deployment-architecture.md` section 3 corrected as part of this stage** — its template's
+        runner invocation could never have worked (`--run-dir`/`--scratch` do not exist; the
+        interpreter is `/app/RFdiffusion/.venv/bin/python`), and its bind map bound the whole
+        output root. Both now match the M1-proven script, plus run-directory log placement so
+        `RunDirectoryReader` can satisfy FR-19. Section 2's bind-map row and the G-11/G-15
+        conformance rows were updated to match.
+      - **Two M1 findings previously recorded as U4 prerequisites are resolved here rather than
+        deferred**: `progress.json` freezing during VALIDATE is handled by BR-5 (reported as
+        "validating (no step-level progress available)", never as a stall), and
+        `ProgressState.frame_path` always being `null` is handled by BR-6 (live-preview
+        availability is decided by `current_frame.pdb` existing on disk, not by that field).
+      - Part 1 planning record — four discrepancies between the design docs and the code that
+        actually ran on Grex were found during the pre-plan research and are recorded there as
+        findings F-1…F-4 rather than resolved silently: (F-1) `deployment-architecture.md`
+        section 3's template invokes `python3.9 -m rfd_runner --run-dir … --scratch …`, but the
+        shipped runner CLI takes a **positional** run_dir, has no `--scratch`, and the container's
+        interpreter is `/app/RFdiffusion/.venv/bin/python`; (F-2) that template binds
+        `$RFD_OUTPUT_ROOT` while the M1-proven script binds only the single run directory;
+        (F-3) `scancel` makes the runner's SIGTERM handler write `FAILED` / "likely walltime
+        exceeded" while Slurm reports `CANCELLED`, so S-2 must reconcile a real contradiction;
+        (F-4) runtime partition discovery (FR-6a) will surface `lgpu`, which the Phase 1 CUDA 11.6
+        image cannot run on. Six decisions were taken without asking (D-1…D-6 in the plan).
 - [ ] U4 Web Application: Code Generation **EXECUTE**
       (Functional Design SKIP, NFR Requirements SKIP, NFR Design SKIP, Infrastructure Design SKIP)
 - [ ] Build and Test - **EXECUTE**
@@ -725,7 +799,9 @@ prepared and awaiting execution on real Grex hardware.)*
   Domain (157 tests, 100% coverage, real Python 3.9.25), U2b Runner Functional Design and Code
   Generation (74 tests, real Python 3.9.25, zero ColabDesign/torch/JAX installed) — **APPROVED
   2026-08-13**
-- **Next Stage**: **U3** — the milestone that gated it (M1) passed on 2026-08-27. Per
+- **Next Stage**: **U3 — ENTERED 2026-08-27. Functional Design is COMPLETE and awaiting approval;
+  U3 Code Generation follows.** The milestone that gated it (M1)
+  passed on 2026-08-27. Per
   unit-of-work.md, U3 is the Slurm/job-orchestration unit whose `JobScriptGenerator` (C-23) emits
   the job script `scripts/m1-submit.sh` is the hand-written instance of. Entering U3 starts with
   its CONSTRUCTION stages (Functional Design onward) and requires user approval at each, per the

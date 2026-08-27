@@ -1,0 +1,61 @@
+[project]
+name = "rfd-web"
+version = "0.1.0"
+description = "Login-node half of rfdiffusion-gui: Slurm submission/tracking/cancellation, the SQLite run index, and run-state reconciliation. No GPU, no PyTorch, no HTTP (that is U4)."
+readme = "README.md"
+requires-python = ">=3.9,<3.10"
+dependencies = [
+    "rfd-core",
+]
+
+# NO FastAPI/uvicorn/Jinja2 here. U3 contains no HTTP code at all; declaring a web
+# framework this unit never imports would put unused packages in uv.lock and make
+# "does this unit really have no HTTP in it?" unanswerable from the manifest.
+# U4 adds them when it adds the routes (tests/test_boundaries.py asserts the absence).
+#
+# NO rfd-runner dependency, ever. That boundary (DD-1, NFR-2) is what keeps PyTorch,
+# JAX and CUDA out of the login-node environment; it is enforced here by the resolver
+# and asserted in tests/test_boundaries.py.
+#
+# ON `requires-python = ">=3.9,<3.10"` (corrected 2026-08-27, U3 Code Generation Step 1):
+# the root pyproject.toml's comment and U3's own design docs both said rfd-web targets
+# >=3.11. That was never installable. rfd-web depends on rfd-core, and rfd-core is capped
+# at <3.10 because it must import inside the U1 container on Python 3.9 -- so ANY
+# environment that can import rfd-core is a 3.9 environment, login node included.
+# `uv lock` proves it directly:
+#   error: Found conflicting Python requirements:
+#     - rfd-core: >=3.9, <3.10
+#     - rfd-runner: >=3.9, <3.10
+#     - rfd-web: >=3.11
+# A uv workspace has ONE lockfile and one requires-python intersection; the alternative
+# (making rfd-web a standalone project with its own lock) would break DD-1's approved
+# "uv workspace, three packages". So this package matches the workspace and is written
+# to run on 3.9.
+
+[tool.uv.sources]
+rfd-core = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rfd_web"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+# Same hazard as rfd-core and rfd-runner, for the same reason: this package imports
+# rfd-core's pydantic models, and pydantic eval()s string annotations at runtime even
+# under `from __future__ import annotations`. UP045/UP007 (Optional[X] -> X | None) are
+# NOT gated by target-version. See rfd-core/pyproject.toml for the full incident writeup.
+ignore = ["UP045", "UP007"]
