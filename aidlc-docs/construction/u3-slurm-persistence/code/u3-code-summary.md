@@ -3,8 +3,8 @@
 **Unit**: U3 (`packages/rfd-web`)
 **Stage**: CONSTRUCTION — Code Generation (Part 2)
 **Date**: 2026-08-27
-**Result**: **225 tests, 96% coverage, on real Python 3.9.25** — plus the pre-existing
-231 tests (`rfd-core` 157, `rfd-runner` 74) re-run and still passing. **456 total.**
+**Result**: **228 tests, 96% coverage, on real Python 3.9.25** — plus the pre-existing
+231 tests (`rfd-core` 157, `rfd-runner` 74) re-run and still passing. **459 total.**
 
 ---
 
@@ -14,7 +14,7 @@ Not claims — commands that were run, with their output:
 
 | Command | Result |
 |---|---|
-| `uv run --package rfd-web pytest packages/rfd-web/tests -q` | **225 passed** |
+| `uv run --package rfd-web pytest packages/rfd-web/tests -q` | **228 passed** |
 | `… --cov=rfd_web` | **96%** (1023 statements, 36 uncovered) |
 | `uv run --package rfd-core pytest packages/rfd-core/tests -q` | **157 passed** (unchanged) |
 | `uv run --package rfd-runner pytest packages/rfd-runner/tests -q` | **74 passed** (unchanged) |
@@ -80,7 +80,7 @@ All application code at the workspace root; nothing executable in `aidlc-docs/`.
   `SubmissionOutcome`, `sanitise_run_id`
 - `query.py` — `RunQueryService`, `RunView`, `ProgressView`, `record_is_finalised`
 
-### Tests (`packages/rfd-web/tests/`, 225 tests)
+### Tests (`packages/rfd-web/tests/`, 228 tests)
 
 `conftest.py`, `test_states.py`, `test_config.py`, `test_adapter.py`, `test_fake.py`,
 `test_partitions.py`, `test_script.py`, `test_script_execution.py`, `test_repository.py`,
@@ -247,3 +247,29 @@ pydantic reason, and the claim is corrected in all four places it appeared.
   `TemplateUploadHandler` goes in front of it; nothing inside U3 needs changing.
 - **`FakeSlurmAdapter` is importable from `rfd_web`**, so the whole app can be developed
   and demoed off-cluster.
+
+---
+
+## Post-generation: first real Grex contact (2026-08-27, `yak`)
+
+`scripts/u3-verify.py --phase read-only` was run on a real Grex login node:
+**33 PASS / 1 WARN / 0 FAIL**. Real `sinfo` parsed (nine GPU partitions, `gpu` marked
+default, `lgpu` annotated incompatible), the real `squeue`→`sacct` fallback parsed job
+7556085 as `COMPLETED exit_code=0`, an unknown job id returned `UNKNOWN(known=False)`
+rather than raising (BR-4 against the real client), and `log_tail` surfaced the actual
+causes of the failed M1 rounds. Details and the full output analysis are in
+`docs/u3-verification.md`.
+
+Three defects that only real data exposed, all fixed with regression tests:
+
+| Defect | Fix |
+|---|---|
+| `log_tail` returned a **partial first line** — seeking to a byte offset lands mid-line, so a traceback tail began `nt call last):` | Drop the fragment after a truncated read (`reader.py`) |
+| Runs recovered by startup reconciliation displayed **`slurm=UNKNOWN`** when no query had been made at all | `JobStatus.known` now gates the reported state; absence of knowledge is `None` (`query.py`) |
+| The verification script's own **`sacct` cross-check silently did nothing** — no indexed run carries a `slurm_job_id`, because M1's runs were submitted by hand and only S-1 records one | The check now emits a loud WARN naming the reason (`scripts/u3-verify.py`) |
+
+The third is not a product defect, but it is the same failure mode this project has been
+bitten by before: a check that reports PASS while proving nothing.
+
+**Still not proven**: nothing has yet submitted a *generated* job script to Slurm. That is
+`--phase submit`, and it remains the gate.

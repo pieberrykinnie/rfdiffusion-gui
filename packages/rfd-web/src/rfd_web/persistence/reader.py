@@ -157,12 +157,20 @@ def _tail_of(path: Path, lines: int) -> str:
     try:
         size = path.stat().st_size
         with path.open("rb") as fh:
-            if size > LOG_TAIL_MAX_BYTES:
+            truncated = size > LOG_TAIL_MAX_BYTES
+            if truncated:
                 fh.seek(-LOG_TAIL_MAX_BYTES, os.SEEK_END)
             data = fh.read()
     except OSError:
         return ""
     text = data.decode("utf-8", errors="replace")
+    if truncated:
+        # Seeking to a byte offset lands mid-line, so the first line is a fragment.
+        # Observed on real Grex data: a traceback tail began "nt call last):".
+        # Dropping it costs one line of a 50-line tail and removes the only line that
+        # could be misread as the start of the error.
+        newline = text.find("\n")
+        text = text[newline + 1 :] if newline != -1 else ""
     tail = text.splitlines()[-lines:] if lines > 0 else []
     return "\n".join(tail)
 

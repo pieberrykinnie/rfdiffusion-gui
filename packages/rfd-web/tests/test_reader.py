@@ -186,3 +186,18 @@ def test_reader_round_trips_a_saved_record(run_dir):
     record.save(run_dir)
     loaded = RunDirectoryReader().read_record(run_dir)
     assert loaded is not None and loaded.run_id == "smoke"
+
+
+def test_a_truncated_tail_drops_the_partial_first_line(run_dir):
+    """Seeking to a byte offset lands mid-line. Observed on real Grex data: a traceback
+    tail began 'nt call last):', which reads like the start of the error and is not."""
+    filler = "x" * (LOG_TAIL_MAX_BYTES + 100)
+    touch(run_dir / "job-1.err", filler + "\nsecond line\nthird line\n")
+    tail = log_tail(run_dir, lines=50)
+    assert tail.splitlines() == ["second line", "third line"]
+    assert not tail.startswith("x")
+
+
+def test_a_truncated_file_with_no_newline_at_all_yields_nothing(run_dir):
+    touch(run_dir / "job-1.err", "y" * (LOG_TAIL_MAX_BYTES + 100))
+    assert log_tail(run_dir) == ""

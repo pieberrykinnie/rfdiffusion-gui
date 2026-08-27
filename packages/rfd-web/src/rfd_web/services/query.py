@@ -312,7 +312,11 @@ class RunQueryService:
             created_at=record.created_at,
             status=status,
             slurm_job_id=record.slurm_job_id,
-            slurm_state=slurm.state if slurm is not None else None,
+            # `known=False` means nobody has actually asked Slurm (or Slurm had no row),
+            # so reporting a state word would be claiming knowledge this view does not
+            # have. Observed on real Grex data: runs recovered from disk were displaying
+            # slurm=UNKNOWN when no query had been made at all.
+            slurm_state=slurm.state if (slurm is not None and slurm.known) else None,
             exit_code=slurm.exit_code if slurm is not None else None,
             mode=record.mode,
             backbone_state=record.backbone_state,
@@ -339,14 +343,20 @@ class RunQueryService:
         self, summary: RunSummary, run_dir: Path, record: Optional[RunRecord]
     ) -> RunView:
         if record is not None:
+            cached = JobStatus(
+                state=SlurmState(summary.slurm_state)
+                if summary.slurm_state
+                else SlurmState.UNKNOWN,
+                exit_code=summary.exit_code,
+                # A run indexed straight from run.json (startup reconciliation) has never
+                # been asked about; say so rather than presenting a fabricated state.
+                known=bool(summary.slurm_state),
+            )
             return self._build_view(
                 record,
                 run_dir,
                 status=summary.status,
-                slurm=JobStatus(
-                    state=SlurmState(summary.slurm_state) if summary.slurm_state else SlurmState.UNKNOWN,
-                    exit_code=summary.exit_code,
-                ),
+                slurm=cached,
                 summary=summary,
                 message=self._terminal_message(summary, record),
             )

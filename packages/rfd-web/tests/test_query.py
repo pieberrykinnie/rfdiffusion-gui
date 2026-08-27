@@ -430,3 +430,24 @@ def test_a_terminal_cancelled_run_keeps_its_explanation_on_re_read(
     second = query.get(run_id)  # served entirely from the index
     assert first.message == second.message
     assert "walltime" not in second.message
+
+
+def test_a_run_recovered_from_disk_does_not_claim_a_slurm_state(
+    layout, config, adapter, repository, written_record
+):
+    """Observed on real Grex data: runs indexed by startup reconciliation displayed
+    slurm=UNKNOWN when no query had been made at all. Absence of knowledge is None."""
+    from rfd_web.persistence.reconcile import RunIndexReconciler
+
+    written_record(
+        "recovered",
+        backbone_state=StageState.COMPLETED,
+        validate_state=StageState.COMPLETED,
+    )
+    RunIndexReconciler(layout, repository).reconcile_all()
+
+    query = RunQueryService(layout, config, adapter, repository)
+    view = query.get("recovered")
+    assert view.status is RunStatus.COMPLETED
+    assert view.slurm_state is None, "nobody asked Slurm; do not present a state word"
+    assert adapter.status_call_count == 0

@@ -138,6 +138,48 @@ U3 is functional on Grex when:
 
 ---
 
+## First real run of phase 1 (2026-08-27, `yak`): 33 PASS / 1 WARN / 0 FAIL
+
+Everything the local suite could not prove, proved:
+
+- **Real `sinfo` parses.** Nine GPU partitions discovered — `gpu`, `agpu`, `lgpu`, `livi`,
+  `livi-b`, `mcordgpu`, `mcordgpu-b`, `stamps`, `stamps-b` — with `gpu` correctly marked
+  default and `lgpu` correctly annotated image-incompatible. Note this is **more than
+  `env.example`'s comment lists**: the non-preemptible `livi`, `mcordgpu` and `stamps` are
+  real and carry 21-day walltimes. Exactly why FR-6a forbids a hard-coded list.
+- **Real `squeue` → `sacct` fallback parses.** Job 7556085 → `COMPLETED`, `exit_code=0`,
+  `signal=0`. An unknown job id → `UNKNOWN(known=False)`, not an exception — BR-4 holds
+  against the real client.
+- **Real `log_tail` works.** The failed M1 rounds surfaced their actual causes: the
+  `ptxas`/XLA error and the `weights_only` `TypeError`. FR-19 is real, not theoretical.
+- **Reconciliation over 11 existing run directories**, none skipped, none mis-flagged.
+
+### Three things that run changed
+
+1. **`log_tail` returned a partial first line.** Reading the last 64 KB lands mid-line, so
+   a traceback tail began `nt call last):` — which reads like the start of the error and
+   is not. The partial line is now dropped. (`test_a_truncated_tail_drops_the_partial_first_line`)
+2. **Recovered runs claimed a Slurm state nobody had asked for.** Runs indexed from
+   `run.json` displayed `slurm=UNKNOWN` when no query had been made at all. Absence of
+   knowledge is now `None`. (`test_a_run_recovered_from_disk_does_not_claim_a_slurm_state`)
+3. **The `sacct` cross-check silently did nothing.** None of the 11 indexed runs carries a
+   `slurm_job_id` in `run.json` — M1's runs were submitted by hand with
+   `sbatch scripts/m1-submit.sh`, and only S-1 writes the job id into the record. The
+   check reported PASS while proving nothing, which is the failure mode this whole
+   document exists to avoid. It now emits a loud WARN naming the reason.
+
+### Eight run directories will show as permanently "queued"
+
+M1's hand-made `run.json` files have `backbone_state: pending` and no `slurm_job_id`, so
+the reconciler reports them as `queued` — correct by the rules (a record with no job id
+and no terminal state *is* pre-submission), but they are dead records that will sit in
+U4's run list forever. They are real history, so nothing was deleted. Options when you get
+to U4: remove those directories, or teach the run list to show a record with no job id and
+no recent activity as *abandoned*. Not a U3 defect either way — every run U3 itself submits
+gets its job id recorded before the index is written.
+
+---
+
 ## Known gap, found while writing this
 
 Phase 1 check 6 can emit:

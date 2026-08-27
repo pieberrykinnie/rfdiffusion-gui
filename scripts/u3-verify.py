@@ -300,6 +300,8 @@ def phase_read_only(layout, config, adapter, known_job_id):
     # means simply calling get() would NOT exercise sacct -- so this check queries the
     # adapter directly as well and compares the two.
     query = RunQueryService(layout, config, adapter, repository)
+    cross_checked = 0
+    no_job_id = 0
     for summary in repository.list(limit=20):
         try:
             view = query.get(summary.run_id)
@@ -327,6 +329,7 @@ def phase_read_only(layout, config, adapter, known_job_id):
             )
 
         if not summary.slurm_job_id:
+            no_job_id += 1
             continue
         try:
             live = adapter.status(summary.slurm_job_id)
@@ -354,6 +357,7 @@ def phase_read_only(layout, config, adapter, known_job_id):
         if expected is None:
             report("WARN", "job {0} -> {1}".format(summary.slurm_job_id, live.state.value))
         elif view.status.value in expected:
+            cross_checked += 1
             report(
                 "PASS",
                 "cross-check: sacct says {0}, reconciler says {1} (exit_code={2})".format(
@@ -383,6 +387,20 @@ def phase_read_only(layout, config, adapter, known_job_id):
                 "loss. Reported rather than silently patched -- see docs/u3-verification.md."
                 .format(live.exit_code),
             )
+
+    # A verification check that silently does nothing is worse than no check at all --
+    # it reports PASS while proving nothing. Say so explicitly.
+    if cross_checked == 0:
+        report(
+            "WARN",
+            "the sacct cross-check did not run on any indexed run",
+            "{0} indexed run(s) carry no slurm_job_id in run.json, so there was nothing to\n"
+            "cross-check against. This is expected if your only run directories are M1's:\n"
+            "those were submitted by hand with `sbatch scripts/m1-submit.sh`, which never\n"
+            "wrote a job id into run.json -- only S-1 does that. Checks 2 and 3 above DID\n"
+            "exercise real sinfo/squeue/sacct; what is untested is the reconciler agreeing\n"
+            "with sacct on a real job. Run `--phase submit` to get that.".format(no_job_id),
+        )
 
 
 # ---------------------------------------------------------------------------
