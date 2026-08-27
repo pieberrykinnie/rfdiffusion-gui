@@ -12,19 +12,40 @@ class ResultService:
         self.reader = reader
         
     def get_result_zip(self, run_id: str) -> Optional[Path]:
-        return self.get_file(run_id, f"{run_id}_results.zip")
+        run_dir = self.layout.run_dir(run_id)
+        if not run_dir.exists():
+            return None
+        zips = sorted(run_dir.glob("*.zip"))
+        if zips:
+            return zips[0]
+        return None
         
     def get_structure(self, run_id: str, design_index: int) -> Optional[Path]:
-        path = self.get_file(run_id, f"design_{design_index}.pdb")
-        if not path:
-            path = self.get_file(run_id, f"designs/design_{design_index}.pdb")
-        return path
+        run_dir = self.layout.run_dir(run_id)
+        if not run_dir.exists():
+            return None
+        pdbs = sorted(run_dir.rglob("*.pdb"))
+        for p in pdbs:
+            if p.name.startswith(".") or p.name == "input.pdb":
+                continue
+            if p.stem.endswith(f"_{design_index}") or p.stem == f"design_{design_index}":
+                return p
+        for p in pdbs:
+            if "best" in p.stem:
+                return p
+        for p in pdbs:
+            if not p.name.startswith(".") and p.name != "input.pdb":
+                return p
+        return None
 
     def get_trajectory(self, run_id: str, design_index: int) -> Optional[Path]:
-        path = self.get_file(run_id, f"trajectory_{design_index}.pdb")
-        if not path:
-            path = self.get_file(run_id, f"trajectories/trajectory_{design_index}.pdb")
-        return path
+        run_dir = self.layout.run_dir(run_id)
+        if not run_dir.exists():
+            return None
+        trajs = sorted(run_dir.rglob("*traj*.pdb"))
+        if trajs:
+            return trajs[0]
+        return None
 
     def get_best_overlay(self, run_id: str) -> Optional[dict[str, Any]]:
         import json

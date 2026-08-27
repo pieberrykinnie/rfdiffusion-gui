@@ -4,74 +4,129 @@
 
 {% block content %}
 <div class="run-header">
-    <h1>{{ run.name }}</h1>
-    <div id="status-container" 
-         hx-get="/runs/{{ run.run_id }}/status" 
-         {% if run.status.value not in ["COMPLETED", "FAILED", "CANCELLED"] %}hx-trigger="every 5s"{% endif %}
-         data-testid="status-container">
-        <!-- Fragment will load here -->
-        <div class="status-badge status-{{ run.status.value | lower }}" data-testid="status-badge">
-            {{ run.status.value }}
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem;">
+        <div>
+            <h1 style="margin-bottom: 0.25rem;">{{ run.name }}</h1>
+            <div class="run-meta" style="color: var(--text-muted); font-size: 0.85rem;">
+                Run ID: <code>{{ run.run_id }}</code> | Created: {{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}
+            </div>
+        </div>
+        <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <div id="status-container" 
+                 hx-get="/runs/{{ run.run_id }}/status" 
+                 {% if run.status.value not in ["COMPLETED", "FAILED", "CANCELLED"] %}hx-trigger="every 5s"{% endif %}
+                 data-testid="status-container">
+                <span class="status-badge status-{{ run.status.value | lower }}" data-testid="status-badge">
+                    {{ run.status.value }}
+                </span>
+            </div>
+            {% if has_zip or run.status.value == "COMPLETED" %}
+            <a href="/runs/{{ run.run_id }}/download" class="btn btn-primary" data-testid="btn-download-zip">
+                ⬇️ Download ZIP
+            </a>
+            {% endif %}
+            <form action="/runs/{{ run.run_id }}/clone" method="post" style="display: inline;">
+                <button type="submit" class="btn btn-secondary" data-testid="btn-clone-run">📋 Clone Run</button>
+            </form>
         </div>
     </div>
-    <div class="run-meta">Created: {{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</div>
 </div>
 
-<div class="run-actions">
-    <a href="/runs/{{ run.run_id }}/clone" class="btn btn-secondary" data-testid="btn-clone-run">Clone Run</a>
-</div>
+<div class="run-detail-grid">
+    <!-- Left Column: Status, Logs, Output Files -->
+    <div class="detail-main" style="display: flex; flex-direction: column; gap: 1.5rem;">
+        
+        <!-- Live Status Partial Fragment Container -->
+        <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.5rem;">
+            <h3 style="margin-bottom: 1rem; color: var(--accent-blue);">Status & Execution Progress</h3>
+            {% include "fragments/status.html" %}
+        </div>
 
-{% if run.status.value == "FAILED" %}
-<div class="error-log-section">
-    <h3>Error Details</h3>
-    <details>
-        <summary data-testid="summary-error-logs">View Logs</summary>
-        <pre data-testid="pre-error-log">{{ error_logs }}</pre>
-    </details>
-</div>
-{% endif %}
+        <!-- Log Tail Card -->
+        <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.5rem;">
+            <h3 style="margin-bottom: 1rem; color: var(--accent-blue);">Execution Log Tail</h3>
+            {% if error_logs %}
+            <details open>
+                <summary style="cursor: pointer; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.5rem;" data-testid="summary-error-logs">View Job Output Logs</summary>
+                <pre class="log-box" style="background: var(--bg-surface); color: #a7f3d0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1rem; font-family: monospace; font-size: 0.85rem; max-height: 320px; overflow-y: auto; white-space: pre-wrap;" data-testid="pre-error-log">{{ error_logs }}</pre>
+            </details>
+            {% else %}
+            <p style="color: var(--text-muted); font-size: 0.9rem;">No log output recorded yet.</p>
+            {% endif %}
+        </div>
 
-<div class="results-section">
-    <h3>Results</h3>
-    
-    {% if run.status.value == "COMPLETED" %}
-    <div class="download-actions">
-        <a href="/runs/{{ run.run_id }}/download" class="btn btn-primary" data-testid="btn-download-zip">Download ZIP</a>
+        <!-- Output Files Card -->
+        <div class="card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.5rem;">
+            <h3 style="margin-bottom: 1rem; color: var(--accent-blue);">Generated Result Files</h3>
+            {% if results_files %}
+            <ul style="list-style: none; display: flex; flex-direction: column; gap: 0.5rem;">
+                {% for file in results_files %}
+                <li style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+                    <span style="font-family: monospace; font-size: 0.85rem; color: var(--text-primary);">{{ file }}</span>
+                    <a href="/runs/{{ run.run_id }}/file/{{ file }}" download class="btn btn-sm btn-secondary" data-testid="link-file-{{ loop.index }}">Download</a>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p style="color: var(--text-muted); font-size: 0.9rem;">Files will appear here once generated.</p>
+            {% endif %}
+        </div>
     </div>
-    {% endif %}
-    
-    <div class="viewer-controls">
-        {% if run.num_designs and run.num_designs > 1 %}
-        <label for="design-selector">Design:</label>
-        <select id="design-selector" data-testid="select-design">
-            {% for i in range(run.num_designs) %}
-            <option value="{{ i }}">Design {{ i }}</option>
-            {% endfor %}
-        </select>
+
+    <!-- Right Column: 3D Visualizer Panel -->
+    <div class="viewer-card">
+        <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.02); display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="font-size: 1.1rem; color: var(--text-primary);">3D Structure Viewer</h3>
+            <span style="font-size: 0.75rem; color: var(--accent-blue); font-weight: 600;">3Dmol.js</span>
+        </div>
+        
+        <div class="viewer-container">
+            <div id="3dmol-viewer" data-testid="viewer-container"></div>
+        </div>
+
+        <div style="padding: 1rem; background: var(--bg-surface); border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="display: flex; gap: 0.75rem; align-items: center;">
+                {% if run.num_designs and run.num_designs > 1 %}
+                <div style="flex: 1;">
+                    <label for="design-selector" style="font-size: 0.75rem;">Design:</label>
+                    <select id="design-selector" data-testid="select-design" style="padding: 0.35rem 0.5rem; font-size: 0.8rem;">
+                        {% for i in range(run.num_designs) %}
+                        <option value="/runs/{{ run.run_id }}/structure/{{ i }}">Design {{ i }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+                <div style="flex: 1;">
+                    <label for="color-scheme" style="font-size: 0.75rem;">Coloring:</label>
+                    <select id="color-scheme" data-testid="select-color-scheme" style="padding: 0.35rem 0.5rem; font-size: 0.8rem;">
+                        <option value="spectrum">Spectrum</option>
+                        <option value="chain">Chain</option>
+                        <option value="plddt">pLDDT B-factor</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <button id="toggle-trajectory" class="btn btn-sm btn-secondary" style="flex: 1;" data-testid="btn-toggle-trajectory">Play Trajectory</button>
+                <button id="toggle-overlay" class="btn btn-sm btn-secondary" style="flex: 1;" data-testid="btn-toggle-overlay">Overlay Best</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    function loadInitialStructure() {
+        if (!window.pdbViewer) {
+            setTimeout(loadInitialStructure, 200);
+            return;
+        }
+        {% if has_structure %}
+        window.pdbViewer.loadStructure('/runs/{{ run.run_id }}/structure/0', 'spectrum');
+        {% else %}
+        window.pdbViewer.loadFrame('/runs/{{ run.run_id }}/frame');
         {% endif %}
-        
-        <label for="color-scheme">Color Scheme:</label>
-        <select id="color-scheme" data-testid="select-color-scheme">
-            <option value="chain">Chain</option>
-            <option value="plddt">pLDDT</option>
-            <option value="spectrum">Spectrum</option>
-        </select>
-        
-        <button id="toggle-trajectory" class="btn btn-secondary" data-testid="btn-toggle-trajectory">Play Trajectory</button>
-        <button id="toggle-overlay" class="btn btn-secondary" data-testid="btn-toggle-overlay">Overlay Best</button>
-    </div>
-
-    <div id="3dmol-viewer" style="height: 400px; width: 100%; position: relative;" data-testid="viewer-container"></div>
-    
-    {% if results_files %}
-    <div class="file-links">
-        <h4>Individual Files</h4>
-        <ul>
-            {% for file in results_files %}
-            <li><a href="/runs/{{ run.run_id }}/files/{{ file }}" data-testid="link-file-{{ loop.index }}">{{ file }}</a></li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
-</div>
+    }
+    loadInitialStructure();
+});
+</script>
 {% endblock %}
