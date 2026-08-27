@@ -31,6 +31,8 @@ class TemplateResolver:
         local = Path(pdb)
         if local.is_file():
             return local
+        if (run_dir / pdb).is_file():
+            return run_dir / pdb
 
         if len(pdb) == 4:
             pdb1 = run_dir / f"{pdb}.pdb1"

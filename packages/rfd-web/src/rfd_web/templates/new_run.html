@@ -67,9 +67,15 @@
         </div>
 
         <div class="form-group">
-            <label for="pdb_file">Template PDB File (Optional)</label>
+            <label for="pdb">Template PDB Code / ID (Optional)</label>
+            <input type="text" id="pdb" name="pdb" placeholder="e.g. 6MRR, P12345" data-testid="input-pdb">
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">RCSB PDB code, UniProt accession, or path</span>
+        </div>
+
+        <div class="form-group">
+            <label for="pdb_file">Template PDB File Upload (Optional)</label>
             <input type="file" id="pdb_file" name="pdb_file" accept=".pdb" data-testid="input-pdb-file">
-            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Upload target/motif PDB structure</span>
+            <span style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">Upload target/motif PDB structure (.pdb)</span>
         </div>
         
         <div class="form-group">

@@ -77,6 +77,9 @@ class SubmissionService:
         template_path: Optional[Path] = None,
         stage: JobStage = JobStage.ALL,
     ) -> SubmissionOutcome:
+        if template_path is not None and not request.pdb:
+            request = request.model_copy(update={"pdb": "input_template.pdb"})
+
         # 1. Validate FIRST. On rejection nothing is created: no directory, no record,
         #    no job, no GPU consumed (FR-5, G-9, BR-11).
         outcome = validate(request)

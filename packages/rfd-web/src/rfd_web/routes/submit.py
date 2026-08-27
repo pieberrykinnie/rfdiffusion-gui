@@ -5,7 +5,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Request, Form, Response, UploadFile, HTTPException
+from starlette.datastructures import UploadFile
+from fastapi import APIRouter, Request, Form, Response, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from rfd_core import preview_mode, validate
@@ -69,55 +70,76 @@ async def submit_run(request: Request, response: Response) -> Any:
         design_request = parse_form_to_request(dict(form_data), config)
     except Exception as e:
         response.status_code = 422
-        return templates.TemplateResponse(request, "new_run.html", {
-            "errors": [str(e)],
-            "config": config,
-            "partitions": partition_cache.get(),
-            "ananas_available": ananas_available,
-        })
-        
-    # 3. Validate request
-    validation_outcome = validate(design_request)
-    
-    if not validation_outcome.ok:
-        response.status_code = 422
-        return templates.TemplateResponse(request, "new_run.html", {
-            "errors": validation_outcome.errors,
-            "config": config,
-            "partitions": partition_cache.get(),
-            "ananas_available": ananas_available,
-        })
+        return templates.TemplateResponse(
+            request,
+            "new_run.html",
+            {
+                "errors": [str(e)],
+                "config": config,
+                "partitions": partition_cache.get(),
+                "ananas_available": ananas_available,
+            },
+            status_code=422,
+        )
         
     # 2. Handle template file upload if provided
-    template_file = form_data.get("template_file")
+    template_file = form_data.get("pdb_file") or form_data.get("template_file")
     
     with tempfile.TemporaryDirectory() as tmp_dir:
         template_path = None
-        if isinstance(template_file, UploadFile) and template_file.filename:
+        if hasattr(template_file, "filename") and template_file.filename:
             try:
                 template_path = await save_upload(template_file, Path(tmp_dir))
+                design_request.pdb = "input_template.pdb"
             except HTTPException as e:
                 response.status_code = 422
-                return templates.TemplateResponse(request, "new_run.html", {
-                    "errors": [e.detail],
+                return templates.TemplateResponse(
+                    request,
+                    "new_run.html",
+                    {
+                        "errors": [e.detail],
+                        "config": config,
+                        "partitions": partition_cache.get(),
+                        "ananas_available": ananas_available,
+                    },
+                    status_code=422,
+                )
+        
+        # 3. Validate request
+        validation_outcome = validate(design_request)
+        
+        if not validation_outcome.ok:
+            response.status_code = 422
+            return templates.TemplateResponse(
+                request,
+                "new_run.html",
+                {
+                    "errors": validation_outcome.errors,
                     "config": config,
                     "partitions": partition_cache.get(),
                     "ananas_available": ananas_available,
-                })
-        
-        # 5. Submit
+                },
+                status_code=422,
+            )
+            
+        # 4. Submit
         outcome = submission_service.submit(design_request, template_path)
         
         if not outcome.ok:
             response.status_code = 422
-            return templates.TemplateResponse(request, "new_run.html", {
-                "errors": outcome.errors,
-                "config": config,
-                "partitions": partition_cache.get(),
-                "ananas_available": ananas_available,
-            })
+            return templates.TemplateResponse(
+                request,
+                "new_run.html",
+                {
+                    "errors": outcome.errors,
+                    "config": config,
+                    "partitions": partition_cache.get(),
+                    "ananas_available": ananas_available,
+                },
+                status_code=422,
+            )
             
-        # 6. Redirect to GET /runs/{id}
+        # 5. Redirect to GET /runs/{id}
         return RedirectResponse(
             url=f"/runs/{outcome.run_id}",
             status_code=303
