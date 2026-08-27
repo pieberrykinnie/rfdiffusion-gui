@@ -85,8 +85,8 @@ def create_app(
     from rfd_web.routes.files import router as files_router
     from rfd_web.routes.help import router as help_router
 
-    app.include_router(runs_router)
     app.include_router(submit_router)
+    app.include_router(runs_router)
     app.include_router(detail_router)
     app.include_router(files_router)
     app.include_router(help_router)

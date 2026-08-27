@@ -15,6 +15,7 @@ from ..validation import parse_form_to_request
 submit_router = APIRouter()
 
 @submit_router.get("/new", response_class=HTMLResponse)
+@submit_router.get("/runs/new", response_class=HTMLResponse)
 async def new_run_form(request: Request, clone_from: Optional[str] = None) -> Any:
     config = request.app.state.config
     templates = request.app.state.templates

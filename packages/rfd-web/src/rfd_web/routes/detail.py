@@ -52,4 +52,4 @@ def clone_run(id: str, request: Request):
     run = service.get(id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return RedirectResponse(url=f"/new?clone_from={id}", status_code=303)
+    return RedirectResponse(url=f"/runs/new?clone_from={id}", status_code=303)

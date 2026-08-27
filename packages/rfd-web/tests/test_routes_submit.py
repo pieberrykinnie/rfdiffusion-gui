@@ -9,6 +9,10 @@ async def test_get_new_run(client: AsyncClient):
     response = await client.get("/new")
     assert response.status_code == 200
     assert "data-testid=" in response.text
+
+    response_runs = await client.get("/runs/new")
+    assert response_runs.status_code == 200
+    assert "data-testid=" in response_runs.text
     
 @pytest.mark.asyncio
 async def test_post_preview_mode(client: AsyncClient):
