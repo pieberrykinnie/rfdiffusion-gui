@@ -1,19 +1,38 @@
-<div id="status-container" class="status-fragment">
-    <div class="status-badge status-{{ run.status.value | lower }}" data-testid="status-badge">
-        {{ run.status.value }}
+<div id="status-container" class="status-fragment"
+     hx-get="/runs/{{ run.run_id }}/status" 
+     {% if run.status.value not in ["COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"] %}hx-trigger="every 3s"{% endif %}
+     hx-swap="outerHTML"
+     data-testid="status-container">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
+        <div class="status-badge status-{{ run.status.value | lower }}" data-testid="status-badge">
+            {{ run.status.value }}
+        </div>
+        {% if run.status.value in ["PENDING", "RUNNING", "QUEUED"] %}
+        <form hx-post="/runs/{{ run.run_id }}/cancel" hx-target="#status-container" hx-swap="outerHTML" style="display: inline;">
+            <button type="submit" class="btn btn-danger btn-sm" data-testid="btn-cancel-run">Cancel Run</button>
+        </form>
+        {% endif %}
     </div>
     
     {% if run.status.value in ["PENDING", "RUNNING"] %}
-        <div class="progress-bar-container">
-            <div class="progress-bar" style="width: {{ run.progress | default(0) }}%" data-testid="progress-bar"></div>
+        <div class="progress-bar-container" style="margin: 0.5rem 0;">
+            <div class="progress" style="height: 0.6rem; background-color: var(--bg-surface); border-radius: 9999px; overflow: hidden; border: 1px solid var(--border-color);">
+                <div class="progress-bar" style="width: {{ (run.progress.step / run.progress.total_steps * 100) if (run.progress and run.progress.total_steps and run.progress.total_steps > 0) else 0 }}%; height: 100%; background: var(--accent-gradient);" data-testid="progress-bar"></div>
+            </div>
+            {% if run.progress and run.progress.total_steps %}
+            <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                <span>Design {{ run.progress.design_index + 1 }} of {{ run.progress.total_designs }}</span>
+                <span>Step {{ run.progress.step }} / {{ run.progress.total_steps }}</span>
+            </div>
+            {% endif %}
         </div>
-        
-        <form hx-post="/runs/{{ run.run_id }}/cancel" hx-target="#status-container" hx-swap="outerHTML">
-            <button type="submit" class="btn btn-danger" data-testid="btn-cancel-run">Cancel Run</button>
-        </form>
     {% endif %}
 
     {% if run.status.value == "VALIDATING" %}
-        <p class="status-note" data-testid="status-note">Validating outputs using ProteinMPNN and AlphaFold2...</p>
+        <p class="status-note" data-testid="status-note" style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.85rem;">Validating outputs using ProteinMPNN and AlphaFold2...</p>
+    {% endif %}
+
+    {% if run.message %}
+        <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">{{ run.message }}</p>
     {% endif %}
 </div>

@@ -20,7 +20,8 @@ from ..errors import PathContainmentError
 LOG_TAIL_MAX_BYTES = 64 * 1024
 
 #: RFdiffusion's best.pdb carries the chosen design index on a REMARK 001 line (FR-24).
-_REMARK_001_RE = re.compile(r"^REMARK\s+001\b.*?(\d+)\s*$")
+_REMARK_001_RE = re.compile(r"^REMARK\s+001\b.*?\bdesign\s+(\d+)", re.IGNORECASE)
+_REMARK_001_FALLBACK_RE = re.compile(r"^REMARK\s+001\s+(\d+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -118,7 +119,7 @@ def best_design_index(run_dir: Path, name: Optional[str] = None) -> Optional[int
                 for line in fh:
                     if not line.startswith("REMARK"):
                         continue
-                    match = _REMARK_001_RE.match(line.strip())
+                    match = _REMARK_001_RE.match(line.strip()) or _REMARK_001_FALLBACK_RE.match(line.strip())
                     if match:
                         return int(match.group(1))
         except OSError:

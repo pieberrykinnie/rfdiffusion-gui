@@ -115,18 +115,30 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", function() {
-    function loadInitialStructure() {
-        if (!window.pdbViewer || !window.pdbViewer.viewer) {
-            setTimeout(loadInitialStructure, 100);
+    function initViewer() {
+        if (!window.$3Dmol) {
+            setTimeout(initViewer, 100);
             return;
         }
-        {% if has_structure %}
-        window.pdbViewer.loadStructure('/runs/{{ run.run_id }}/structure/0', 'spectrum');
-        {% else %}
-        window.pdbViewer.loadFrame('/runs/{{ run.run_id }}/frame');
-        {% endif %}
+        
+        const runId = '{{ run.run_id }}';
+        const isCompleted = {{ 'true' if run.status.value == "COMPLETED" else 'false' }};
+        const hasStructure = {{ 'true' if has_structure else 'false' }};
+        const scheme = document.getElementById('color-scheme')?.value || 'spectrum';
+        
+        window.pdbViewer = new PDBViewer('3dmol-viewer', {
+            runId: runId,
+            scheme: scheme,
+            designIndex: 0
+        });
+
+        if (hasStructure || isCompleted) {
+            window.pdbViewer.loadStructure('/runs/' + runId + '/structure/0', scheme);
+        } else {
+            window.pdbViewer.startLivePolling(runId, 0);
+        }
     }
-    setTimeout(loadInitialStructure, 150);
+    setTimeout(initViewer, 50);
 });
 </script>
 {% endblock %}
