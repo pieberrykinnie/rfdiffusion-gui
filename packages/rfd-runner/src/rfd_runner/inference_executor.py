@@ -9,6 +9,7 @@ business-rules.md section 2 for the per-step timeout rationale.
 from __future__ import annotations
 
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,28 @@ def _dump_ends_with_ter(path: Path) -> bool:
     return content[-3:] == "TER"
 
 
+def _drain_stream(stream, chunks: List[str]) -> None:
+    """Continuously drains a stream in chunks to prevent OS pipe buffers from filling and deadlocking the child."""
+    if stream is None:
+        return
+    try:
+        while True:
+            line = stream.readline()
+            if not line:
+                break
+            chunks.append(line)
+            # Bound memory consumption by keeping the tail
+            if len(chunks) > 2000:
+                del chunks[:1000]
+    except Exception:
+        pass
+    finally:
+        try:
+            stream.close()
+        except Exception:
+            pass
+
+
 class InferenceExecutor:
     def run_inference(
         self,
@@ -73,6 +96,36 @@ class InferenceExecutor:
 
         proc = popen_factory(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
+        # Background reader threads to actively drain stdout/stderr pipes and avoid OS pipe buffer deadlock
+        stdout_chunks: List[str] = []
+        stderr_chunks: List[str] = []
+        threads: List[threading.Thread] = []
+
+        stdout_pipe = getattr(proc, "stdout", None)
+        if stdout_pipe is not None and hasattr(stdout_pipe, "readline"):
+            t_out = threading.Thread(target=_drain_stream, args=(stdout_pipe, stdout_chunks), daemon=True)
+            t_out.start()
+            threads.append(t_out)
+
+        stderr_pipe = getattr(proc, "stderr", None)
+        if stderr_pipe is not None and hasattr(stderr_pipe, "readline"):
+            t_err = threading.Thread(target=_drain_stream, args=(stderr_pipe, stderr_chunks), daemon=True)
+            t_err.start()
+            threads.append(t_err)
+
+        def _get_stderr_tail() -> str:
+            for t in threads:
+                t.join(timeout=1.0)
+            if stderr_chunks:
+                return _last_4kb("".join(stderr_chunks))
+            if hasattr(proc, "communicate"):
+                try:
+                    _out, err = proc.communicate()
+                    return _last_4kb(err)
+                except Exception:
+                    pass
+            return ""
+
         try:
             for design_i in range(num_designs):
                 for step in range(total_steps):
@@ -83,9 +136,8 @@ class InferenceExecutor:
                         if proc.poll() is not None:
                             if _dump_ends_with_ter(dump_path):
                                 break  # fast final write -- treated as success for this step
-                            _stdout, stderr = proc.communicate()
                             return InferenceResult(
-                                exit_code=proc.returncode, stderr_tail=_last_4kb(stderr)
+                                exit_code=proc.returncode, stderr_tail=_get_stderr_tail()
                             )
 
                         if _dump_ends_with_ter(dump_path):
@@ -107,8 +159,9 @@ class InferenceExecutor:
 
                         time.sleep(poll_interval_s)
 
-            _stdout, stderr = proc.communicate()
-            return InferenceResult(exit_code=proc.returncode, stderr_tail=_last_4kb(stderr))
+            if proc.poll() is None:
+                proc.wait()
+            return InferenceResult(exit_code=proc.returncode, stderr_tail=_get_stderr_tail())
         except BaseException:
             # Mirrors the notebook's `except KeyboardInterrupt: os.kill(pid, SIGTERM)` (line 223),
             # generalised to any exception/signal the runner itself receives while polling --

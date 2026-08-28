@@ -303,3 +303,37 @@ def test_stale_dumps_cleared_before_popen_is_created(tmp_path):
     assert not stale.exists()
     assert result.exit_code == 1
     assert calls == []
+
+
+def test_large_output_pipe_drain_avoids_deadlock(tmp_path):
+    """Verifies that large stdout/stderr outputs (>64KB pipe buffer) are drained without deadlocking."""
+    import sys
+    dump_dir = tmp_path
+    
+    # Script that writes 150KB to stdout and 150KB to stderr while creating 0.pdb
+    script = (
+        "import sys, time, pathlib\n"
+        "dump = pathlib.Path(sys.argv[1])\n"
+        "for i in range(1000):\n"
+        "    sys.stdout.write('A' * 200 + '\\n')\n"
+        "    sys.stderr.write('B' * 200 + '\\n')\n"
+        "    sys.stdout.flush()\n"
+        "    sys.stderr.flush()\n"
+        "(dump / '0.pdb').write_text('ATOM ...\\nTER')\n"
+        "time.sleep(0.05)\n"
+    )
+    
+    calls = []
+    result = InferenceExecutor().run_inference(
+        [sys.executable, "-c", script, str(dump_dir)],
+        total_steps=1,
+        num_designs=1,
+        dump_dir=dump_dir,
+        on_step=lambda *a: calls.append(a),
+        timeout_seconds=5,
+        poll_interval_ms=5,
+    )
+    
+    assert result.exit_code == 0
+    assert len(calls) == 1
+
